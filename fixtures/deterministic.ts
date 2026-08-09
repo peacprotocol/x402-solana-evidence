@@ -1,38 +1,125 @@
-import { encodePaymentSignatureHeader, encodePaymentResponseHeader } from '@x402/core/http';
-import {
-  PAYMENT_IDENTIFIER as PAYMENT_IDENTIFIER_KEY,
-  declarePaymentIdentifierExtension,
-  appendPaymentIdentifierToExtensions,
-} from '@x402/extensions/payment-identifier';
-
 /**
  * Deterministic fixture data.
  *
- * Synthetic x402-shaped artifacts with fixed values, so every run produces identical digests without
- * a network, chain, facilitator or key.
+ * Every artifact here is built against the upstream x402 v2 types and accepted by the upstream
+ * runtime validators, so the conformance vectors describe real x402 objects rather than shapes
+ * invented locally. Nothing is cast: if an upstream type changes, these fixtures stop compiling,
+ * which is the point.
  *
- * SYNTHETIC ONLY: no value here is a real wallet, key, transaction or payer identity.
+ * SYNTHETIC ONLY. Network and asset identifiers are the public Solana devnet constants exported by
+ * the upstream package. Every payer, recipient, fee payer, transaction and signature value is
+ * fabricated placeholder text: no wallet, key, real transaction or payer identity appears here, and
+ * the encoded "transaction" is not a decodable Solana transaction.
  */
+import {
+  encodePaymentRequiredHeader,
+  encodePaymentSignatureHeader,
+  encodePaymentResponseHeader,
+} from '@x402/core/http';
+import type {
+  PaymentRequired,
+  PaymentRequirements,
+  PaymentPayload,
+  SettleResponse,
+  ResourceInfo,
+} from '@x402/core/types';
+import { SOLANA_DEVNET_CAIP2, USDC_DEVNET_ADDRESS } from '@x402/svm';
+import {
+  PAYMENT_IDENTIFIER,
+  declarePaymentIdentifierExtension,
+  appendPaymentIdentifierToExtensions,
+} from '@x402/extensions/payment-identifier';
 
 /** Fixed instant so binding digests are reproducible across runs. */
 export const FIXED_NOW_UNIX_SECONDS = 1_785_000_000;
 
 export const RESOURCE_URL = 'https://api.example.test/v1/forecast?region=alpha&units=metric';
 
-/** CAIP-2 for Solana devnet. Passed through unchanged, never re-mapped. */
-export const NETWORK = 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1';
+/** CAIP-2 for Solana devnet, taken from the upstream constant rather than transcribed. */
+export const NETWORK = SOLANA_DEVNET_CAIP2;
 export const SCHEME = 'exact';
-export const ASSET_MINT = 'SyntheticMint1111111111111111111111111111111';
+/** The public devnet USDC mint, from the upstream constant. */
+export const ASSET_MINT = USDC_DEVNET_ADDRESS;
 export const AMOUNT_BASE_UNITS = '250000';
 export const TOKEN_DECIMALS = 6;
+export const MAX_TIMEOUT_SECONDS = 60;
+
+// Placeholder account identifiers. They follow the base58 alphabet so they look like what they
+// stand for, and they correspond to no account on any network.
 export const PAY_TO = 'SyntheticRecipient11111111111111111111111111';
 export const PAYER = 'SyntheticPayer111111111111111111111111111111';
-/** Fixed identifier matching the upstream grammar: at least 16 chars of [a-zA-Z0-9_-]. */
-export const PAYMENT_ID = 'pay_0000000000000000000000000000f1x2';
-export const TX_SIGNATURE = 'SyntheticTxSig1111111111111111111111111111111111111111111111111111111111111111111111';
+export const FEE_PAYER = 'SyntheticFeePayer11111111111111111111111111';
+export const RECENT_BLOCKHASH = 'SyntheticBlockhash111111111111111111111111111';
+export const TX_SIGNATURE =
+  'SyntheticTxSig1111111111111111111111111111111111111111111111111111111111111111111111';
 export const OBSERVED_SLOT = 300_000_000;
 export const COMMITMENT_LEVEL = 'confirmed';
-export const RECENT_BLOCKHASH = 'SyntheticBlockhash111111111111111111111111111';
+
+/** Fixed identifier matching the upstream grammar: 16 to 128 chars of [A-Za-z0-9_-]. */
+export const PAYMENT_ID = 'pay_0000000000000000000000000000f1x2';
+
+/**
+ * The scheme-specific payload member for exact on SVM, whose shape upstream defines as a single
+ * base64 wire transaction. The content is fixed placeholder text so digests are reproducible.
+ */
+export const EXACT_SVM_TRANSACTION = Buffer.from(
+  'synthetic-placeholder-not-a-solana-transaction',
+  'utf8',
+).toString('base64');
+
+export const RESOURCE_INFO: ResourceInfo = {
+  url: RESOURCE_URL,
+  description: 'Synthetic forecast resource used by the deterministic fixtures',
+  mimeType: 'application/json',
+};
+
+export const PAYMENT_REQUIREMENTS: PaymentRequirements = {
+  scheme: SCHEME,
+  network: NETWORK,
+  asset: ASSET_MINT,
+  amount: AMOUNT_BASE_UNITS,
+  payTo: PAY_TO,
+  maxTimeoutSeconds: MAX_TIMEOUT_SECONDS,
+  // The facilitator advertises its fee payer here; the value is synthetic.
+  extra: { feePayer: FEE_PAYER, recentBlockhash: RECENT_BLOCKHASH },
+};
+
+/** Extensions as a resource server would declare them, built with the upstream declaration API. */
+export const DECLARED_EXTENSIONS: Record<string, unknown> = {
+  [PAYMENT_IDENTIFIER]: declarePaymentIdentifierExtension(true),
+};
+
+export const PAYMENT_REQUIRED: PaymentRequired = {
+  x402Version: 2,
+  resource: RESOURCE_INFO,
+  accepts: [PAYMENT_REQUIREMENTS],
+  extensions: DECLARED_EXTENSIONS,
+};
+
+/**
+ * Extensions as a client would send them: the server's declaration with the client's identifier
+ * appended by the upstream client API, so the structure is whatever x402 actually defines.
+ */
+export const PAYLOAD_EXTENSIONS: Record<string, unknown> = appendPaymentIdentifierToExtensions(
+  { [PAYMENT_IDENTIFIER]: declarePaymentIdentifierExtension(true) },
+  PAYMENT_ID,
+);
+
+export const PAYMENT_PAYLOAD: PaymentPayload = {
+  x402Version: 2,
+  resource: RESOURCE_INFO,
+  accepted: PAYMENT_REQUIREMENTS,
+  payload: { transaction: EXACT_SVM_TRANSACTION },
+  extensions: PAYLOAD_EXTENSIONS,
+};
+
+/** Settlement response as the origin observed it, in the shape upstream declares for it. */
+export const SETTLEMENT_RESPONSE: SettleResponse = {
+  success: true,
+  transaction: TX_SIGNATURE,
+  network: NETWORK,
+  payer: PAYER,
+};
 
 /** The x402 signed offer, shaped like the offer-receipt extension's offer object. */
 export const SIGNED_OFFER = {
@@ -57,17 +144,6 @@ export const SIGNED_RECEIPT = {
   paymentId: PAYMENT_ID,
 } as const;
 
-/** Settlement response as the origin observed it. */
-export const SETTLEMENT_RESPONSE = {
-  success: true,
-  network: NETWORK,
-  transactionSignature: TX_SIGNATURE,
-  slot: OBSERVED_SLOT,
-  commitment: COMMITMENT_LEVEL,
-  recentBlockhash: RECENT_BLOCKHASH,
-  source: 'synthetic-facilitator',
-} as const;
-
 /** The request body the customer sent (empty for a GET). */
 export const REQUEST_BODY = new Uint8Array(0);
 
@@ -87,42 +163,21 @@ export const ORIGIN_RESULT_BODY_TEXT = JSON.stringify({
 export const ORIGIN_RESULT_BODY = new TextEncoder().encode(ORIGIN_RESULT_BODY_TEXT);
 
 /**
- * Headers are produced by the installed x402 encoders, so fixtures match the real transport
- * (standard Base64 JSON) rather than a locally assumed encoding.
+ * Field values are produced by the installed x402 encoders, so the fixtures carry the real
+ * transport encoding rather than one assumed locally.
+ *
+ * Names are lowercased, as an origin application observes them after HTTP parsing.
  */
-
-/**
- * Headers as the ORIGIN APPLICATION observes them after HTTP parsing.
- * Lowercased field names, as an HTTP/2 origin would see them.
- */
-/**
- * A PaymentPayload as x402 v2 defines it. The payment identifier travels inside `extensions`,
- * which is where the resource server extracts it from; it is not a separate HTTP header.
- */
-export const PAYMENT_PAYLOAD = {
-  x402Version: 2,
-  scheme: SCHEME,
-  network: NETWORK,
-  payload: {
-    payer: PAYER,
-    amount: AMOUNT_BASE_UNITS,
-    asset: ASSET_MINT,
-    payTo: PAY_TO,
-  },
-  // Built with the upstream extension APIs so the shape is whatever x402 actually defines
-  // ({ info: { required, id }, schema }), not a locally guessed structure.
-  extensions: appendPaymentIdentifierToExtensions(
-    { [PAYMENT_IDENTIFIER_KEY]: declarePaymentIdentifierExtension(true as never) } as never,
-    PAYMENT_ID as never,
-  ),
+export const OBSERVED_CHALLENGE_HEADERS = {
+  'payment-required': encodePaymentRequiredHeader(PAYMENT_REQUIRED),
 } as const;
 
 export const OBSERVED_REQUEST_HEADERS = {
-  'payment-signature': encodePaymentSignatureHeader(PAYMENT_PAYLOAD as never),
+  'payment-signature': encodePaymentSignatureHeader(PAYMENT_PAYLOAD),
 } as const;
 
 export const OBSERVED_RESPONSE_HEADERS = {
-  'payment-response': encodePaymentResponseHeader(SETTLEMENT_RESPONSE as never),
+  'payment-response': encodePaymentResponseHeader(SETTLEMENT_RESPONSE),
 } as const;
 
 export const HTTP_VERSION = '2.0';

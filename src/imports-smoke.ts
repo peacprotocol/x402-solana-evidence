@@ -53,14 +53,21 @@ const REQUIRED_EXPORTS: Record<string, readonly string[]> = {
     'validatePaymentRequired',
     'validatePaymentPayload',
   ],
-  '@x402/svm': ['SOLANA_DEVNET_CAIP2', 'USDC_DEVNET_ADDRESS'],
+  '@x402/svm': ['SOLANA_DEVNET_CAIP2', 'USDC_DEVNET_ADDRESS', 'SettlementCache', 'assertFeePayerIsolated'],
   '@x402/svm/exact/server': ['ExactSvmScheme', 'registerExactSvmScheme'],
+  '@x402/svm/exact/client': ['ExactSvmScheme', 'registerExactSvmScheme'],
+  '@x402/svm/exact/facilitator': ['ExactSvmScheme', 'registerExactSvmScheme'],
+  '@x402/express': ['paymentMiddleware', 'x402ResourceServer'],
   '@x402/extensions/offer-receipt': ['OFFER_RECEIPT', 'createOfferReceiptExtension', 'canonicalize'],
   '@x402/extensions/payment-identifier': [
     'PAYMENT_IDENTIFIER',
+    'declarePaymentIdentifierExtension',
+    'appendPaymentIdentifierToExtensions',
     'extractAndValidatePaymentIdentifier',
+    'validatePaymentIdentifier',
     'generatePaymentId',
   ],
+  '@x402/extensions/builder-code': ['BUILDER_CODE', 'declareBuilderCodeExtension'],
 };
 const REQUIRED_SUBPATHS = Object.keys(REQUIRED_EXPORTS);
 

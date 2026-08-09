@@ -16,6 +16,12 @@ import * as F from '../fixtures/deterministic.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
+const req = await captureObservedX402Artifact({
+  name: 'Payment-Required',
+  observedValue: F.OBSERVED_CHALLENGE_HEADERS['payment-required'],
+  capturePoint: 'client_response_after_http_parsing',
+  httpVersion: F.HTTP_VERSION,
+});
 const sig = await captureObservedX402Artifact({
   name: 'Payment-Signature',
   observedValue: F.OBSERVED_REQUEST_HEADERS['payment-signature'],
@@ -55,7 +61,11 @@ const golden = {
   originResultBodyDigest: digestBytes(F.ORIGIN_RESULT_BODY),
   requestBodyDigest: digestBytes(F.REQUEST_BODY),
   settleResponseLocalStructuralAuthority: SETTLE_RESPONSE_LOCAL_AUTHORITY,
-  observedHeaders: { 'payment-signature': sig,  'payment-response': resp },
+  observedHeaders: {
+    'payment-required': req,
+    'payment-signature': sig,
+    'payment-response': resp,
+  },
 };
 
 const out = join(HERE, '..', 'fixtures', 'golden-v1.json');

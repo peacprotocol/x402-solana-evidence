@@ -288,6 +288,26 @@ const notBase64 = await capture('not*standard*base64');
 check('a value outside the standard base64 alphabet is refused at transport',
   notBase64.stages.transport === 'rejected' && notBase64.stages.json === 'not_evaluated');
 
+recordExecution('X402-REJECT-007');
+// A valid field value, tampered after encoding. Whatever the altered bytes decode to, the artifact
+// must not reach acceptance, and the observed digest must differ from the untampered one.
+const authentic = F.OBSERVED_REQUEST_HEADERS['payment-signature'];
+const flip = (c: string) => (c === 'A' ? 'B' : 'A');
+const midpoint = Math.floor(authentic.length / 2);
+const tampered = authentic.slice(0, midpoint) + flip(authentic[midpoint]!) + authentic.slice(midpoint + 1);
+check('the tampered value differs from the authentic one', tampered !== authentic);
+const tamperedArtifact = await capture(tampered);
+const authenticArtifact = await capture(authentic);
+check('base64 tampered after encoding does not reach acceptance',
+  tamperedArtifact.stages['upstream-schema'] !== 'accepted' ||
+    tamperedArtifact.validatedObjectJcsDigest !== authenticArtifact.validatedObjectJcsDigest,
+  JSON.stringify(tamperedArtifact.stages));
+check('the observed digest of a tampered value differs from the authentic value',
+  tamperedArtifact.observedValueDigest !== authenticArtifact.observedValueDigest);
+await rejectsAsync('acceptance refuses a tampered field value',
+  () => requireValidX402Artifact({ name: 'payment-signature', observedValue: tampered, capturePoint: 'origin_request_after_http_parsing', httpVersion: '2.0' }),
+  X402ValidationError);
+
 console.log('\n  -- RFC 8785 --');
 rejects('lone high surrogate MUST throw', () => canonicalizeIndependent({ a: '\ud800' }), JcsError);
 rejects('lone low surrogate MUST throw', () => canonicalizeIndependent({ a: '\udc00' }), JcsError);
