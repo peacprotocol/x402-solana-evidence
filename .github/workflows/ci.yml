@@ -1,0 +1,112 @@
+name: ci
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+# Least privilege: nothing in this workflow writes to the repository, and no secrets are used,
+# so a fork pull request has exactly the same capabilities as a branch push.
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: verify (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22', '24']
+    steps:
+      # Actions are pinned to immutable commit SHAs. A tag can be moved; a SHA cannot.
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Enable pnpm from the packageManager pin
+        run: corepack enable
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Dependency import smoke
+        run: pnpm test:imports
+
+      - name: Conformance vectors
+        run: pnpm test:golden
+
+      - name: Rejection corpus
+        run: pnpm test:negative
+
+      - name: Acceptance matrix completeness
+        run: pnpm test:acceptance
+
+      - name: Typecheck (primary)
+        run: pnpm typecheck
+
+      - name: Typecheck (compatibility)
+        run: pnpm typecheck:compat
+
+      # Exercises the egress diagnostics themselves. They are an early warning on a developer
+      # machine, not the offline gate; the offline job below is what actually proves it.
+      - name: Fixture path with egress diagnostics
+        run: pnpm demo:offline
+
+      # FOUND-DET-001: the fixture walkthrough must be byte-identical run to run, or the
+      # committed vectors describe something that cannot be reproduced.
+      - name: Fixture determinism
+        run: |
+          pnpm demo:fixture > /tmp/fixture-run-1.txt
+          pnpm demo:fixture > /tmp/fixture-run-2.txt
+          diff /tmp/fixture-run-1.txt /tmp/fixture-run-2.txt
+
+  offline:
+    name: offline path (no network)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Enable pnpm from the packageManager pin
+        run: corepack enable
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # FOUND-NET-001: the authoritative offline gate. Dependencies are installed first, then the
+      # fixture path runs in a container with no network interface at all, so a claim that the
+      # offline path needs no network is proven by the environment rather than by instrumentation.
+      # Plain node runs the sources directly, so the gate depends on no build step of its own.
+      - name: Fixture path with networking disabled
+        run: |
+          docker run --rm --network=none \
+            -v "$PWD:/work" -w /work \
+            node:24 \
+            node src/fixture-demo.ts
+
+  secret-scan:
+    name: secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Scan history for committed secrets
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0

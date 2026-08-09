@@ -40,11 +40,13 @@ export type DuplicateScanResult =
     };
 
 class ScanFailure extends Error {
-  constructor(
-    readonly code: DuplicateScanCode,
-    readonly path: readonly string[],
-  ) {
+  readonly code: DuplicateScanCode;
+  readonly path: readonly string[];
+
+  constructor(code: DuplicateScanCode, path: readonly string[]) {
     super(code);
+    this.code = code;
+    this.path = path;
   }
 }
 
@@ -55,8 +57,11 @@ const BARE_VALUE = /[0-9eE+\-.a-z]/;
 class Scanner {
   private index = 0;
   private readonly path: string[] = [];
+  private readonly text: string;
 
-  constructor(private readonly text: string) {}
+  constructor(text: string) {
+    this.text = text;
+  }
 
   run(): void {
     this.skipWhitespace();
