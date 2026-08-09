@@ -1,0 +1,145 @@
+{
+  "_comment": "Conformance vectors with hard-coded expected bytes and digests. Regenerate via pnpm gen:golden and review the diff.",
+  "profileRequestBinding": "org.peacprotocol.examples.payment-evidence/request-binding/1",
+  "profileOriginResultBinding": "org.peacprotocol.examples.payment-evidence/origin-result-binding/1",
+  "requestBinding": {
+    "profile": "org.peacprotocol.examples.payment-evidence/request-binding/1",
+    "components": {
+      "@method": "GET",
+      "@scheme": "https",
+      "@authority": "api.example.test",
+      "@path": "/v1/forecast",
+      "@query": "?region=alpha&units=metric",
+      "capturePoint": "origin_request_after_http_parsing",
+      "proxyTrustProfile": "direct-origin"
+    },
+    "bodyDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "selectedHeaders": [
+      {
+        "name": "payment-signature",
+        "observedValueDigest": "sha256:a5c9011e08c0ea70e57d27b0d16f4c8abe9d9f108f4d1d4c1731cc56f95ec982"
+      }
+    ]
+  },
+  "requestBindingJcsUtf8Hex": "7b22626f6479446967657374223a227368613235363a65336230633434323938666331633134396166626634633839393666623932343237616534316534363439623933346361343935393931623738353262383535222c22636f6d706f6e656e7473223a7b2240617574686f72697479223a226170692e6578616d706c652e74657374222c22406d6574686f64223a22474554222c224070617468223a222f76312f666f726563617374222c22407175657279223a223f726567696f6e3d616c70686126756e6974733d6d6574726963222c2240736368656d65223a226874747073222c2263617074757265506f696e74223a226f726967696e5f726571756573745f61667465725f687474705f70617273696e67222c2270726f7879547275737450726f66696c65223a226469726563742d6f726967696e227d2c2270726f66696c65223a226f72672e7065616370726f746f636f6c2e6578616d706c65732e7061796d656e742d65766964656e63652f726571756573742d62696e64696e672f31222c2273656c656374656448656164657273223a5b7b226e616d65223a227061796d656e742d7369676e6174757265222c226f6273657276656456616c7565446967657374223a227368613235363a61356339303131653038633065613730653537643237623064313666346338616265396439663130386634643164346331373331636335366639356563393832227d5d7d",
+  "requestBindingDigest": "sha256:d3b4a2f6bd00bfd47e8d79d8ef68d84ef479e190c2c0080e1d8da6fde68e639e",
+  "originResultBinding": {
+    "profile": "org.peacprotocol.examples.payment-evidence/origin-result-binding/1",
+    "status": 200,
+    "contentType": "application/json",
+    "bodyDigest": "sha256:5f564269ae83a2ab0cde2d8de9fed2921ffa95e67aa7fa6035884c93bce3087c",
+    "capturePoint": "origin_pre_transfer_encoding"
+  },
+  "originResultBindingJcsUtf8Hex": "7b22626f6479446967657374223a227368613235363a35663536343236396165383361326162306364653264386465396665643239323166666139356536376161376661363033353838346339336263653330383763222c2263617074757265506f696e74223a226f726967696e5f7072655f7472616e736665725f656e636f64696e67222c22636f6e74656e7454797065223a226170706c69636174696f6e2f6a736f6e222c2270726f66696c65223a226f72672e7065616370726f746f636f6c2e6578616d706c65732e7061796d656e742d65766964656e63652f6f726967696e2d726573756c742d62696e64696e672f31222c22737461747573223a3230307d",
+  "originResultBindingDigest": "sha256:ea22f378381de6decceb275b26126380c04475b92f95d92bca6616a048b6a59c",
+  "originResultBodyDigest": "sha256:5f564269ae83a2ab0cde2d8de9fed2921ffa95e67aa7fa6035884c93bce3087c",
+  "requestBodyDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "settleResponseLocalStructuralAuthority": "@x402/core@2.20.0-type-shape",
+  "observedHeaders": {
+    "payment-signature": {
+      "name": "payment-signature",
+      "artifactType": "PaymentPayload",
+      "observedValue": "eyJ4NDAyVmVyc2lvbiI6Miwic2NoZW1lIjoiZXhhY3QiLCJuZXR3b3JrIjoic29sYW5hOkV0V1RSQUJaYVlxNmlNZmVZS291UnUxNjZWVTJ4cWExIiwicGF5bG9hZCI6eyJwYXllciI6IlN5bnRoZXRpY1BheWVyMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExIiwiYW1vdW50IjoiMjUwMDAwIiwiYXNzZXQiOiJTeW50aGV0aWNNaW50MTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMSIsInBheVRvIjoiU3ludGhldGljUmVjaXBpZW50MTExMTExMTExMTExMTExMTExMTExMTExMTEifSwiZXh0ZW5zaW9ucyI6eyJwYXltZW50LWlkZW50aWZpZXIiOnsiaW5mbyI6eyJyZXF1aXJlZCI6dHJ1ZSwiaWQiOiJwYXlfMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMGYxeDIifSwic2NoZW1hIjp7IiRzY2hlbWEiOiJodHRwczovL2pzb24tc2NoZW1hLm9yZy9kcmFmdC8yMDIwLTEyL3NjaGVtYSIsInR5cGUiOiJvYmplY3QiLCJwcm9wZXJ0aWVzIjp7InJlcXVpcmVkIjp7InR5cGUiOiJib29sZWFuIn0sImlkIjp7InR5cGUiOiJzdHJpbmciLCJtaW5MZW5ndGgiOjE2LCJtYXhMZW5ndGgiOjEyOCwicGF0dGVybiI6Il5bYS16QS1aMC05Xy1dKyQifX0sInJlcXVpcmVkIjpbInJlcXVpcmVkIl19fX19",
+      "observedValueDigest": "sha256:a5c9011e08c0ea70e57d27b0d16f4c8abe9d9f108f4d1d4c1731cc56f95ec982",
+      "stages": {
+        "transport": "accepted",
+        "json": "accepted",
+        "duplicate-members": "accepted",
+        "upstream-schema": "rejected",
+        "scheme-payload": "not_evaluated",
+        "extensions": "not_evaluated"
+      },
+      "diagnostics": [
+        {
+          "stage": "upstream-schema",
+          "code": "invalid_type",
+          "path": [
+            "accepted"
+          ]
+        }
+      ],
+      "upstreamSchemaAuthority": "@x402/core@2.20.0/schemas",
+      "capturePoint": "origin_request_after_http_parsing",
+      "httpVersion": "2.0",
+      "decodedPayloadDigest": "sha256:405457ff5964106cdae3327611ded0a09ecb2003a361e8fccaaf25c94fa7d368",
+      "decoded": {
+        "x402Version": 2,
+        "scheme": "exact",
+        "network": "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
+        "payload": {
+          "payer": "SyntheticPayer111111111111111111111111111111",
+          "amount": "250000",
+          "asset": "SyntheticMint1111111111111111111111111111111",
+          "payTo": "SyntheticRecipient11111111111111111111111111"
+        },
+        "extensions": {
+          "payment-identifier": {
+            "info": {
+              "required": true,
+              "id": "pay_0000000000000000000000000000f1x2"
+            },
+            "schema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "required": {
+                  "type": "boolean"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 16,
+                  "maxLength": 128,
+                  "pattern": "^[a-zA-Z0-9_-]+$"
+                }
+              },
+              "required": [
+                "required"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "payment-response": {
+      "name": "payment-response",
+      "artifactType": "SettleResponse",
+      "observedValue": "eyJzdWNjZXNzIjp0cnVlLCJuZXR3b3JrIjoic29sYW5hOkV0V1RSQUJaYVlxNmlNZmVZS291UnUxNjZWVTJ4cWExIiwidHJhbnNhY3Rpb25TaWduYXR1cmUiOiJTeW50aGV0aWNUeFNpZzExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEiLCJzbG90IjozMDAwMDAwMDAsImNvbW1pdG1lbnQiOiJjb25maXJtZWQiLCJyZWNlbnRCbG9ja2hhc2giOiJTeW50aGV0aWNCbG9ja2hhc2gxMTExMTExMTExMTExMTExMTExMTExMTExMTEiLCJzb3VyY2UiOiJzeW50aGV0aWMtZmFjaWxpdGF0b3IifQ==",
+      "observedValueDigest": "sha256:94473bc640286d9d2b0e43b741a6f1673ef9a086bdddeeba20f1b4a747692fdf",
+      "stages": {
+        "transport": "accepted",
+        "json": "accepted",
+        "duplicate-members": "accepted",
+        "upstream-schema": "not_evaluated",
+        "scheme-payload": "not_evaluated",
+        "extensions": "not_evaluated"
+      },
+      "diagnostics": [
+        {
+          "stage": "local-structural",
+          "code": "expected_string",
+          "path": [
+            "transaction"
+          ]
+        }
+      ],
+      "upstreamSchemaAuthority": "@x402/core@2.20.0/schemas",
+      "capturePoint": "origin_response_before_gateway",
+      "httpVersion": "2.0",
+      "localStructural": {
+        "upstreamSchemaStatus": "not_evaluated",
+        "localStructuralStatus": "rejected",
+        "localStructuralAuthority": "@x402/core@2.20.0-type-shape"
+      },
+      "decodedPayloadDigest": "sha256:783fb794ac23a66c0f44707d8cacda91a4a37abe5dbde4824ae7da7875cdca5e",
+      "decoded": {
+        "success": true,
+        "network": "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
+        "transactionSignature": "SyntheticTxSig1111111111111111111111111111111111111111111111111111111111111111111111",
+        "slot": 300000000,
+        "commitment": "confirmed",
+        "recentBlockhash": "SyntheticBlockhash111111111111111111111111111",
+        "source": "synthetic-facilitator"
+      }
+    }
+  }
+}

@@ -2,10 +2,39 @@
   "name": "peac-payment-evidence-example",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "description": "Reference example: portable payment evidence for x402 interactions using PEAC records.",
   "license": "Apache-2.0",
   "engines": {
     "node": ">=22.13.0"
   },
-  "packageManager": "pnpm@8.15.0"
+  "packageManager": "pnpm@8.15.0",
+  "scripts": {
+    "fixture": "tsx src/fixture-demo.ts",
+    "test": "pnpm test:imports && pnpm test:golden && pnpm test:negative && pnpm typecheck && pnpm typecheck:next",
+    "test:imports": "tsx src/imports-smoke.ts",
+    "test:golden": "tsx src/test-golden.ts",
+    "test:negative": "tsx src/test-negative.ts",
+    "test:acceptance": "tsx src/test-acceptance.ts",
+    "gen:golden": "tsx src/gen-golden.ts",
+    "typecheck": "tsc --noEmit",
+    "typecheck:next": "./run-ts-canary.sh"
+  },
+  "dependencies": {
+    "@peac/crypto": "0.16.3",
+    "@peac/kernel": "0.16.3",
+    "@peac/protocol": "0.16.3",
+    "@peac/schema": "0.16.3",
+    "@x402/core": "2.20.0",
+    "@x402/express": "2.20.0",
+    "@x402/extensions": "2.20.0",
+    "@x402/svm": "2.20.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "ajv": "8.18.0",
+    "tsx": "4.20.6",
+    "typescript": "6.0.3",
+    "typescript-next": "npm:typescript@7.0.2"
+  }
 }
