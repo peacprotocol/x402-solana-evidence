@@ -34,7 +34,7 @@
   "originResultBindingDigest": "sha256:ea22f378381de6decceb275b26126380c04475b92f95d92bca6616a048b6a59c",
   "originResultBodyDigest": "sha256:5f564269ae83a2ab0cde2d8de9fed2921ffa95e67aa7fa6035884c93bce3087c",
   "requestBodyDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-  "settleResponseLocalStructuralAuthority": "@x402/core@2.20.0-type-shape",
+  "settleResponseLocalStructuralAuthority": "@x402/core@2.21.0-type-shape",
   "observedHeaders": {
     "payment-required": {
       "name": "payment-required",
@@ -50,7 +50,7 @@
         "extensions": "not_evaluated"
       },
       "diagnostics": [],
-      "upstreamSchemaAuthority": "@x402/core@2.20.0/schemas",
+      "upstreamSchemaAuthority": "@x402/core@2.21.0/schemas",
       "capturePoint": "client_response_after_http_parsing",
       "httpVersion": "2.0",
       "decodedPayloadDigest": "sha256:4435742cea8154264dde74baaeac1a1c0cfb9995a776057683999af018aaacb8",
@@ -117,7 +117,7 @@
         "extensions": "accepted"
       },
       "diagnostics": [],
-      "upstreamSchemaAuthority": "@x402/core@2.20.0/schemas",
+      "upstreamSchemaAuthority": "@x402/core@2.21.0/schemas",
       "capturePoint": "origin_request_after_http_parsing",
       "httpVersion": "2.0",
       "decodedPayloadDigest": "sha256:b1e2dec9ec597d48c5213737e85330f3b3d32696fece4677f598b341c09d03ff",
@@ -186,13 +186,13 @@
         "extensions": "not_evaluated"
       },
       "diagnostics": [],
-      "upstreamSchemaAuthority": "@x402/core@2.20.0/schemas",
+      "upstreamSchemaAuthority": "@x402/core@2.21.0/schemas",
       "capturePoint": "origin_response_before_gateway",
       "httpVersion": "2.0",
       "localStructural": {
         "upstreamSchemaStatus": "not_evaluated",
         "localStructuralStatus": "accepted",
-        "localStructuralAuthority": "@x402/core@2.20.0-type-shape"
+        "localStructuralAuthority": "@x402/core@2.21.0-type-shape"
       },
       "decodedPayloadDigest": "sha256:7a227ee346f73f3aa98e375c23d5af77d0f1d8c3073f8e8384eaad0a62c55923",
       "decoded": {

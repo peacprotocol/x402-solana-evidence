@@ -51,7 +51,7 @@ export class X402PromotionError extends Error {}
  * The exact upstream version this profile is written against. The import smoke test asserts that
  * the installed package matches, so a silent upgrade cannot invalidate the authority strings below.
  */
-export const X402_PINNED_VERSION = '2.20.0';
+export const X402_PINNED_VERSION = '2.21.0';
 
 /** Named validation authorities. Every reported status is attributable to one of these. */
 export const UPSTREAM_SCHEMA_AUTHORITY = `@x402/core@${X402_PINNED_VERSION}/schemas` as const;
