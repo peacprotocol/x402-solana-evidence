@@ -20,10 +20,11 @@
  * trusted for anything but the private half. Nothing here reaches past those functions into
  * internals, and no key bytes are assembled by hand.
  */
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { derivePublicKey, generateKeypair } from '@peac/crypto';
+import { parseKeyFileJson, readKeyFile, refuseKeyFile, writeNewKeyFile } from './key-file.ts';
 
 const APP_ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const KEY_DIR = join(APP_ROOT, '.local', 'keys');
@@ -63,16 +64,34 @@ interface StoredIssuerKey {
   readonly privateKeyHex: string;
 }
 
+/** Exactly the 32 bytes of an Ed25519 private key, written as lower or upper case hex. */
+const PRIVATE_KEY_HEX = /^[0-9a-fA-F]{64}$/;
+
+/**
+ * Load the stored issuer key.
+ *
+ * @param path - The key file to read.
+ * @returns The stored key, or `undefined` when the file does not exist.
+ * @throws InvalidKeyFileError when the file exists and does not hold a usable key.
+ */
 function loadStoredKey(path: string): StoredIssuerKey | undefined {
-  try {
-    const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<StoredIssuerKey>;
-    if (typeof parsed.kid === 'string' && typeof parsed.privateKeyHex === 'string') {
-      return { note: String(parsed.note ?? ''), kid: parsed.kid, privateKeyHex: parsed.privateKeyHex };
-    }
-  } catch {
-    // Absent or unreadable is the ordinary first-run case; a new key is generated below.
+  const text = readKeyFile(path);
+  if (text === undefined) return undefined;
+
+  const parsed = parseKeyFileJson(path, text);
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    refuseKeyFile(path, 'it does not hold a key object');
   }
-  return undefined;
+  const stored = parsed as Partial<StoredIssuerKey>;
+  if (typeof stored.kid !== 'string' || stored.kid.length === 0) {
+    refuseKeyFile(path, 'it has no key identifier');
+  }
+  // Validated as hex before decoding, because the decoder discards characters it does not
+  // recognise: a damaged field would otherwise decode to a shorter, entirely different key.
+  if (typeof stored.privateKeyHex !== 'string' || !PRIVATE_KEY_HEX.test(stored.privateKeyHex)) {
+    refuseKeyFile(path, 'its private key is not 32 bytes of hex');
+  }
+  return { note: String(stored.note ?? ''), kid: stored.kid, privateKeyHex: stored.privateKeyHex };
 }
 
 /**
@@ -98,10 +117,11 @@ export async function resolveIssuerKey(
   const stored = loadStoredKey(path);
   if (stored !== undefined) {
     const privateKey = Uint8Array.from(Buffer.from(stored.privateKeyHex, 'hex'));
-    if (privateKey.byteLength !== 32) {
-      throw new Error(`stored issuer key is ${privateKey.byteLength} bytes, expected 32`);
+    try {
+      return { privateKey, publicKey: await derivePublicKey(privateKey), kid: stored.kid, iss };
+    } catch (e) {
+      refuseKeyFile(path, `its private key is not usable (${(e as Error).message.split('\n')[0]})`);
     }
-    return { privateKey, publicKey: await derivePublicKey(privateKey), kid: stored.kid, iss };
   }
 
   const generated = await generateKeypair();
@@ -112,8 +132,8 @@ export async function resolveIssuerKey(
     kid,
     privateKeyHex: Buffer.from(generated.privateKey).toString('hex'),
   };
-  writeFileSync(path, `${JSON.stringify(payload, null, 2)}\n`, { mode: 0o600 });
-  // Written separately as well, because an existing file keeps its previous permissions.
+  writeNewKeyFile(path, `${JSON.stringify(payload, null, 2)}\n`);
+  // Set separately as well, in case the file's mode did not come from the create above.
   chmodSync(path, 0o600);
   return { privateKey: generated.privateKey, publicKey: generated.publicKey, kid, iss };
 }

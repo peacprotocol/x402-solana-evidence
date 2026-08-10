@@ -36,7 +36,8 @@ import {
 import { createPaidResource, type RequestObservation } from './server.ts';
 import { fetchPaidResource } from './client.ts';
 import { readPreflightPass, PREFLIGHT_MARKER_PATH } from './preflight.ts';
-import { displayKeyPath, loadPayerSigner, PAYER_KEY_PATH } from './payer-key.ts';
+import { loadPayerSigner, PAYER_KEY_PATH } from './payer-key.ts';
+import { displayKeyPath } from './key-file.ts';
 import { buildEvidence, RESOURCE_PATH, RESOURCE_QUERY } from './fixture-e2e.ts';
 import { runEvidenceDir, runEvidenceDisplay, writeEvidence } from './issue-record.ts';
 import { resolveIssuerKey } from './issuer-key.ts';

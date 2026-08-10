@@ -98,6 +98,10 @@ export const ACCEPTANCE_CASES = {
   'KEY-RT-001': { description: 'a payer key is created, persisted and reloaded to the same address', scope: 'local' },
   'KEY-RT-002': { description: 'a reloaded payer key signs, and the signature verifies under the persisted public key', scope: 'local' },
   'KEY-RT-003': { description: 'a devnet issuer key is created, persisted and reloaded to the same key pair', scope: 'local' },
+  'KEY-FC-001': { description: 'a payer key file that is not valid JSON is refused and left unchanged', scope: 'local' },
+  'KEY-FC-002': { description: 'a payer key file of the wrong length is refused and left unchanged', scope: 'local' },
+  'KEY-FC-003': { description: 'a payer key file whose halves do not match is refused and left unchanged', scope: 'local' },
+  'KEY-FC-004': { description: 'an issuer key file with an unusable private key is refused and left unchanged', scope: 'local' },
 } as const satisfies Record<string, AcceptanceCase>;
 
 export type AcceptanceId = keyof typeof ACCEPTANCE_CASES;

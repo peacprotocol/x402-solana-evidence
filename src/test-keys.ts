@@ -8,20 +8,28 @@
  * key that was persisted alongside it. Reading a file back is not evidence that the key survived;
  * producing a signature that verifies is.
  *
+ * The second half asks the opposite question: what happens to a key file that exists but cannot be
+ * loaded. The answer has to be that it is refused and left alone, because the alternative, treating
+ * every failure as a first run, silently replaces a key that may hold funds. Each case damages a
+ * file in a different way and asserts both that the attempt fails and that the file's bytes are
+ * unchanged afterwards.
+ *
  * Every case runs against a temporary directory, never the real key files, so running the suite
  * can neither read nor disturb a funded devnet key.
  *
  * These cases need no network. Generating a key is local computation, and nothing here contacts a
  * chain, a faucet or a facilitator.
  */
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { getAddressEncoder } from '@solana/kit';
 import { derivePublicKey, ed25519Verify } from '@peac/crypto';
 import { beginAcceptanceSuite, recordExecution } from './acceptance-ids.ts';
-import { createPayerKeyFile, loadPayerSigner } from './flow/payer-key.ts';
+import { createPayerKeyFile, loadPayerSigner, resolvePayerSigner } from './flow/payer-key.ts';
 import { resolveIssuerKey } from './flow/issuer-key.ts';
+import { InvalidKeyFileError } from './flow/key-file.ts';
 
 beginAcceptanceSuite('keys');
 
@@ -148,6 +156,113 @@ recordExecution('KEY-RT-003');
     'a record signed by the reloaded issuer key verifies under the created public key',
     await ed25519Verify(signature, message, created.publicKey),
   );
+}
+
+console.log('\nKey files that cannot be loaded\n');
+
+/**
+ * Run one refusal case.
+ *
+ * The assertion that matters is not only that the call failed: it is that the file on disk is
+ * byte-for-byte what it was. A loader that generated a replacement key would pass a "did it throw"
+ * check just as easily if it wrote first and failed afterwards, so the bytes are compared.
+ *
+ * @param name - What the case is called in the output.
+ * @param contents - The damaged file to write before the attempt.
+ * @param attempt - The call under test, given the path to the damaged file.
+ */
+async function refusesAndLeavesFileAlone(
+  name: string,
+  contents: string,
+  attempt: (path: string) => Promise<unknown>,
+): Promise<void> {
+  const path = join(workspace, `${name}.json`);
+  writeFileSync(path, contents);
+  const before = createHash('sha256').update(readFileSync(path)).digest('hex');
+
+  let refusal: unknown;
+  try {
+    await attempt(path);
+  } catch (e) {
+    refusal = e;
+  }
+  const after = createHash('sha256').update(readFileSync(path)).digest('hex');
+
+  check(`${name}: the attempt fails`, refusal !== undefined);
+  check(
+    `${name}: it fails as an invalid key file rather than by generating a new key`,
+    refusal instanceof InvalidKeyFileError,
+    refusal instanceof Error ? refusal.message.split('\n')[0] : String(refusal),
+  );
+  check(
+    `${name}: the message says the file was not modified and names it`,
+    refusal instanceof InvalidKeyFileError &&
+      refusal.message.includes('It was not modified.') &&
+      refusal.message.includes(`${name}.json`),
+  );
+  check(`${name}: the file is byte-identical afterwards`, before === after);
+}
+
+// Every case calls the create-on-first-use path, because that is the one that would otherwise
+// replace the key: a plain load has nothing to overwrite with.
+recordExecution('KEY-FC-001');
+await refusesAndLeavesFileAlone('payer-malformed-json', '[1, 2, 3', (p) => resolvePayerSigner(p));
+
+recordExecution('KEY-FC-002');
+await refusesAndLeavesFileAlone(
+  'payer-wrong-length',
+  JSON.stringify(Array.from({ length: 32 }, () => 7)),
+  (p) => resolvePayerSigner(p),
+);
+
+recordExecution('KEY-FC-003');
+{
+  // Structurally perfect and cryptographically wrong: 64 entries, all byte values, but the public
+  // half belongs to a different key. Nothing short of the key pair check catches this one.
+  const keptPath = join(workspace, 'payer-source.json');
+  const other = await createPayerKeyFile(join(workspace, 'payer-other.json'));
+  const source = await createPayerKeyFile(keptPath);
+  const mixed = JSON.parse(readFileSync(keptPath, 'utf8')) as number[];
+  mixed.splice(32, 32, ...Array.from(getAddressEncoder().encode(other.address)));
+  check('the mismatched file is still 64 byte values', mixed.length === 64 && mixed.every((b) => Number.isInteger(b) && b >= 0 && b <= 255));
+  check('the two halves come from different keys', other.address !== source.address);
+  await refusesAndLeavesFileAlone('payer-mismatched-halves', JSON.stringify(mixed), (p) =>
+    resolvePayerSigner(p),
+  );
+}
+
+recordExecution('KEY-FC-004');
+await refusesAndLeavesFileAlone(
+  'issuer-unusable-private-key',
+  `${JSON.stringify({ note: 'damaged', kid: 'issuer-key-1', privateKeyHex: 'not hex at all' }, null, 2)}\n`,
+  (p) => resolveIssuerKey('devnet', p),
+);
+
+{
+  // The other way a key is lost: a file that appears between deciding to create one and writing it.
+  const path = join(workspace, 'payer-exclusive.json');
+  const created = await createPayerKeyFile(path);
+  const before = createHash('sha256').update(readFileSync(path)).digest('hex');
+  let refusal: unknown;
+  try {
+    await createPayerKeyFile(path);
+  } catch (e) {
+    refusal = e;
+  }
+  const after = createHash('sha256').update(readFileSync(path)).digest('hex');
+  check('creating a key file over an existing one is refused', refusal instanceof InvalidKeyFileError);
+  check('that file is byte-identical afterwards', before === after);
+  check(
+    'and it still loads as the key it was',
+    (await loadPayerSigner(path))?.address === created.address,
+  );
+}
+
+{
+  // Absence stays the one case that means "no key yet", so first use still works.
+  const path = join(workspace, 'payer-first-use.json');
+  const created = await resolvePayerSigner(path);
+  check('a missing key file is created on first use', (await loadPayerSigner(path))?.address === created.address);
 }
 
 rmSync(workspace, { recursive: true, force: true });
