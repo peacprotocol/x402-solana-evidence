@@ -213,9 +213,12 @@ proxy trust before treating a forwarded scheme or authority as trusted.
 ## Quickstart
 
 ```bash
-corepack enable
+corepack pnpm@8.15.0 install --frozen-lockfile
+corepack pnpm@8.15.0 test
+
+# or, with the pinned pnpm on PATH after `corepack enable`:
 pnpm install --frozen-lockfile
-pnpm test           # every suite, the acceptance matrix and both typechecks
+pnpm test           # every suite, both typechecks and the acceptance matrix
 pnpm demo:fixture   # the offline end-to-end run; writes and verifies the committed evidence
 pnpm verify         # verify that evidence from the files and a public key alone
 pnpm tamper-demo    # edit one bound field in a copy and watch verification name the failure
@@ -230,15 +233,17 @@ and the Solana devnet procedure.
 corepack enable
 
 pnpm install --frozen-lockfile   # exact versions from the lockfile
-pnpm test                        # the full gate
+pnpm test                        # the full gate: every line below, in order, stopping at the first failure
 pnpm test:imports                # upstream export paths and exact version pins
 pnpm test:golden                 # conformance vectors and staged-validation reporting
 pnpm test:negative               # rejection corpus
+pnpm test:keys                   # key creation, persistence and fail-closed loading
+pnpm test:preflight              # preflight revalidation and recipient validation
 pnpm test:flow                   # offline end-to-end run and the lifecycle failure branches
 pnpm test:svm                    # security, replay, binding and tamper cases
-pnpm test:acceptance             # every declared acceptance case executed
 pnpm typecheck                   # TypeScript 7, primary
 pnpm typecheck:compat            # TypeScript 6, compatibility gate
+pnpm test:acceptance             # every declared acceptance case executed
 pnpm demo:binding                # deterministic binding walkthrough
 pnpm demo:fixture                # offline end-to-end run, writes fixtures/expected-evidence
 pnpm demo:offline                # binding walkthrough with egress diagnostics installed

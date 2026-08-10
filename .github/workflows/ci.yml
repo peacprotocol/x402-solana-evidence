@@ -36,23 +36,13 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
-      - name: Dependency import smoke
-        run: pnpm test:imports
-
-      - name: Conformance vectors
-        run: pnpm test:golden
-
-      - name: Rejection corpus
-        run: pnpm test:negative
-
-      - name: Offline end-to-end flow
-        run: pnpm test:flow
-
-      # Security, replay, binding and tamper cases. Deterministic and loopback-only, like every
-      # other job in this matrix: it starts an origin, presents altered payments to it, and edits
-      # copies of the evidence in a temporary directory.
-      - name: Security, replay, binding and tamper matrix
-        run: pnpm test:svm
+      # One entry point, the same one the walkthrough documents, so continuous integration cannot
+      # drift into running a different set of suites than a reader does. It runs every suite, both
+      # typechecks and the acceptance-completeness gate in order, and stops at the first failure.
+      # Everything it runs is deterministic and loopback-only: origins are started in-process,
+      # altered payments are presented to them, and evidence is edited in temporary directories.
+      - name: Test suite
+        run: pnpm test
 
       # The committed evidence is verified from the directory and a public key alone, which is the
       # position a reader of this repository is in.
@@ -63,15 +53,6 @@ jobs:
       # verifier against silently accepting a tampered directory.
       - name: Tamper demonstration
         run: pnpm tamper-demo
-
-      - name: Acceptance matrix completeness
-        run: pnpm test:acceptance
-
-      - name: Typecheck (primary)
-        run: pnpm typecheck
-
-      - name: Typecheck (compatibility)
-        run: pnpm typecheck:compat
 
       # Exercises the egress diagnostics themselves. They are an early warning on a developer
       # machine, not the offline gate; the offline job below is what actually proves it.

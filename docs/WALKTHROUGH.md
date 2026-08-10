@@ -30,14 +30,19 @@ in this process, and the wallet is a stand-in that returns fixed placeholder byt
 pnpm test:imports     # upstream export paths and exact version pins
 pnpm test:golden      # conformance vectors and staged-validation reporting
 pnpm test:negative    # rejection corpus
+pnpm test:keys        # key creation, persistence and fail-closed loading
+pnpm test:preflight   # preflight revalidation and recipient validation
 pnpm test:flow        # offline end-to-end run and the lifecycle failure branches
 pnpm test:svm         # security, replay, binding and tamper cases
-pnpm test:acceptance  # every declared acceptance case executed
 pnpm typecheck        # TypeScript 7, primary
 pnpm typecheck:compat # TypeScript 6, compatibility gate
+pnpm test:acceptance  # every declared acceptance case executed
 ```
 
-`pnpm test` runs all of the above in that order.
+`pnpm test` runs all of the above in that order, stopping at the first failure, and it is what
+continuous integration runs, so the two cannot diverge. The acceptance gate is last because it
+checks that every declared case executed, which only means something once everything that records
+a case has run.
 
 Then the run itself:
 
@@ -266,13 +271,19 @@ runs.
 
 ## Troubleshooting
 
-**`pnpm: command not found`.** Corepack is not enabled, or its shims are not on `PATH`. Either run
-`corepack enable` once, or prefix every command with the pinned version:
+**No pnpm at all, and none wanted.** Corepack ships with Node, so the pinned version can be used
+without installing or enabling anything. This is the whole path, and it needs no `corepack enable`
+and no shim on `PATH`:
 
 ```bash
 corepack pnpm@8.15.0 install --frozen-lockfile
 corepack pnpm@8.15.0 test
 ```
+
+Every step of `test` is spawned as `node <local entry point>` rather than as a nested package
+manager command, so nothing in the run resolves `pnpm` from `PATH`. Run
+`node scripts/run-all.mjs` directly after installing if you would rather not involve corepack in
+the second command either.
 
 **`pnpm install --frozen-lockfile` fails.** The lockfile and `package.json` disagree. Do not drop
 the flag to make it pass: that resolves different upstream versions than the ones the conformance

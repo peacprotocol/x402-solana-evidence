@@ -18,7 +18,7 @@
     "demo:offline": "tsx src/fixture-demo-offline.ts",
     "verify": "tsx src/flow/verify-evidence.ts",
     "tamper-demo": "tsx src/flow/tamper-demo.ts",
-    "test": "pnpm test:imports && pnpm test:golden && pnpm test:negative && pnpm test:keys && pnpm test:preflight && pnpm test:flow && pnpm test:svm && pnpm test:acceptance && pnpm typecheck && pnpm typecheck:compat",
+    "test": "node scripts/run-all.mjs",
     "test:imports": "tsx src/imports-smoke.ts",
     "test:keys": "tsx src/test-keys.ts",
     "test:preflight": "tsx src/test-preflight.ts",
