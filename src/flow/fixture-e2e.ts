@@ -9,9 +9,9 @@
  *
  * Determinism comes from fixed inputs rather than from suppressing outputs: a fixed clock, fixed
  * account identifiers and a fixed payment identifier. The port is the one thing that cannot be
- * fixed, so the origin binds to an ephemeral port and no observed value derives from it: the
- * resource identity that reaches the evidence is the configured resource URL, not the loopback
- * address the process happened to receive.
+ * fixed, so this run binds a fixed SYNTHETIC resource identity that no socket produced, rather than
+ * the loopback address the process happened to receive. A live run does the opposite and binds the
+ * components the origin observed, port included; the two are named apart wherever they are used.
  *
  * WHAT THIS RUN DOES NOT SHOW. No payment occurs. The facilitator settles nothing, the transaction
  * reference is fixed placeholder text, and no output of this run may be presented as a payment
@@ -30,7 +30,7 @@ import { join } from 'node:path';
 import { beginAcceptanceSuite, recordExecution } from '../acceptance-ids.ts';
 import { captureObservedX402Artifact, requireValidX402Artifact } from '../x402-header.ts';
 import { buildOriginResultBinding, buildRequestBinding } from '../binding.ts';
-import { componentsFromAbsoluteUri } from '../components.ts';
+import { componentsFromAbsoluteUri, type HttpRequestComponentsV1 } from '../components.ts';
 import type { Sha256Digest } from '../digest.ts';
 import * as F from '../../fixtures/deterministic.ts';
 import { resolveIssuerKey, type RunMode } from './issuer-key.ts';
@@ -71,6 +71,13 @@ export interface RunResult {
   /** The origin's view of the paid retry, which is what the evidence describes. */
   readonly origin: RequestObservation;
   readonly terminalState: TerminalState;
+  /**
+   * Host and port the origin was listening on for this run, read from the listener itself.
+   *
+   * Independent of anything the request carried, so a case can compare what a binding names against
+   * what was actually serving rather than against another value taken from the same request.
+   */
+  readonly listenerAuthority: string;
 }
 
 /**
@@ -123,7 +130,8 @@ export async function runOnce(options: RunOptions = {}): Promise<RunResult> {
     server.once('listening', () => resolve());
     server.once('error', reject);
   });
-  const { port } = server.address() as AddressInfo;
+  const { address, port } = server.address() as AddressInfo;
+  const listenerAuthority = `${address}:${port}`;
 
   try {
     const client = await fetchPaidResource(
@@ -146,7 +154,13 @@ export async function runOnce(options: RunOptions = {}): Promise<RunResult> {
       RequestObservation,
       RequestObservation,
     ];
-    return { client, challenge, origin, terminalState: origin.lifecycle.terminalState };
+    return {
+      client,
+      challenge,
+      origin,
+      terminalState: origin.lifecycle.terminalState,
+      listenerAuthority,
+    };
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
@@ -184,8 +198,12 @@ function determinismNote(): string {
     '  The signature covers iat, so without this the record bytes, and only the record bytes,',
     '  would differ between runs.',
     '',
-    'The listening port is not fixed and does not need to be: no bound value derives from it.',
-    'The resource is identified by its configured URL, not by the loopback address.',
+    'The listening port is not fixed and does not need to be, because this run binds a fixed',
+    'SYNTHETIC resource identity rather than the address it was served on. That identity',
+    'corresponds to no socket and no deployment; it exists so these bytes reproduce.',
+    '',
+    'A live run binds the opposite: the request components the origin observed, including the',
+    'real authority and port it was serving on. Nothing in this directory describes a live run.',
     '',
     'This evidence describes an offline run. No payment occurred, no facilitator or node was',
     'contacted, and the transaction reference is placeholder text.',
@@ -200,11 +218,26 @@ function determinismNote(): string {
  * both modes, so a live run cannot drift into a second evidence model: it supplies its own issuer
  * key, resource identity, observation source and clock, and nothing else changes.
  */
+/**
+ * How the operation the evidence describes is identified.
+ *
+ * `observed` binds the RFC 9421 components the origin captured from the request it actually served,
+ * including the port it was serving on. That is what a live run records: the request that happened,
+ * not the one that was configured, and the two differ whenever the listener takes an ephemeral port.
+ *
+ * `synthetic` binds a fixed resource identity that no socket produced. Only the deterministic
+ * fixture uses it, because a run against an ephemeral port cannot reproduce byte for byte. It is
+ * named synthetic everywhere it appears rather than being presented as an observation.
+ */
+export type RequestIdentity =
+  | { readonly kind: 'observed'; readonly components: HttpRequestComponentsV1 }
+  | { readonly kind: 'synthetic'; readonly resourceUrl: string };
+
 export interface EvidenceOptions {
   /** Selects the issuer key: the fixed test key, or the local devnet demonstration key. */
   readonly mode: RunMode;
-  /** Resource identity that reaches the binding. Always the configured URL, never a socket address. */
-  readonly resourceUrl: string;
+  /** What the request binding describes: an observed request, or the fixture's fixed identity. */
+  readonly requestIdentity: RequestIdentity;
   readonly requestBody: Uint8Array;
   /** Supplied offline so the record bytes reproduce; omitted live, where issuance generates one. */
   readonly jti?: string;
@@ -223,7 +256,7 @@ export interface EvidenceOptions {
 /** The offline run's inputs: fixed key, fixed clock, fixed identifiers, no network contacted. */
 export const FIXTURE_EVIDENCE_OPTIONS: EvidenceOptions = {
   mode: 'fixture',
-  resourceUrl: F.RESOURCE_URL,
+  requestIdentity: { kind: 'synthetic', resourceUrl: F.RESOURCE_URL },
   requestBody: F.REQUEST_BODY,
   jti: FIXTURE_JTI,
   observedAtUnixSeconds: F.FIXED_NOW_UNIX_SECONDS,
@@ -305,10 +338,19 @@ export async function buildEvidence(
       : {}),
   };
 
-  // The resource is identified by its configured URL, not by the loopback address the process
-  // happened to be given, so the binding describes the resource rather than the test harness.
+  // A live run binds the request the origin observed; the fixture binds its fixed synthetic
+  // identity. Which one is in force is decided by the caller and stated in the value itself, so
+  // neither can be mistaken for the other by reading the binding.
+  const components =
+    options.requestIdentity.kind === 'observed'
+      ? options.requestIdentity.components
+      : componentsFromAbsoluteUri({
+          method: 'GET',
+          absoluteUri: options.requestIdentity.resourceUrl,
+        });
+
   const requestBinding = buildRequestBinding({
-    components: componentsFromAbsoluteUri({ method: 'GET', absoluteUri: options.resourceUrl }),
+    components,
     body: options.requestBody,
     selectedHeaders:
       signatureArtifact === undefined

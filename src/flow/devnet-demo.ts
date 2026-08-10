@@ -14,8 +14,9 @@
  *
  * EVIDENCE. A live run emits the same artifact set as the offline one, through the same code: the
  * capture, binding, issuance and verification path is `buildEvidence` from the offline run, called
- * with the inputs that genuinely differ (the devnet issuer key, the real clock, the facilitator as
- * the observation source, and no supplied record identifier). It is written to `out/<runId>/`,
+ * with the inputs that genuinely differ (the devnet issuer key, the real clock, the request as the
+ * origin observed it, the facilitator as the observation source, and no supplied record
+ * identifier). It is written to `out/<runId>/`,
  * which is gitignored, because it describes one run rather than a fixture; the committed fixture
  * directory is never touched. The run then verifies what it wrote, from those files and a public
  * key alone, and fails if that verification does not pass.
@@ -54,10 +55,12 @@ import type { ObservationSource } from './observe-settlement.ts';
 const PRICE_BASE_UNITS = '10000';
 
 /**
- * The resource's configured identity, which is what reaches the evidence.
+ * The resource identity advertised in the x402 payment requirements.
  *
- * The origin listens on an ephemeral port, but no bound value derives from it: the binding
- * describes the resource this run configured, not the socket the process happened to receive.
+ * This is x402's own `resource` field and stays the configured value. The PEAC request binding does
+ * NOT derive from it: that binds the components the origin captured from the request it actually
+ * served, ephemeral port included, so the evidence describes the request that happened rather than
+ * the one that was configured.
  */
 const RESOURCE_URL = `http://127.0.0.1${RESOURCE_PATH}${RESOURCE_QUERY}`;
 
@@ -165,7 +168,7 @@ export async function main(): Promise<void> {
     server.once('listening', () => resolve());
     server.once('error', reject);
   });
-  const { port } = server.address() as AddressInfo;
+  const { address, port } = server.address() as AddressInfo;
 
   try {
     const result = await fetchPaidResource(
@@ -202,11 +205,23 @@ export async function main(): Promise<void> {
     console.log(`  transaction         : ${origin.lifecycle.transaction ?? '(none)'}`);
 
     /**
+     * The request this run served, as the origin observed it.
+     *
+     * Required rather than optional. A live run whose request the component profile refuses to
+     * describe has nothing honest to bind, and falling back to the configured resource identity
+     * would put a value in the evidence that no request produced.
+     */
+    const components = origin.components;
+    if (components === undefined) {
+      throw new Error('the origin could not describe the request it served as RFC 9421 components');
+    }
+
+    /**
      * The evidence for this run, built by the offline run's own path.
      *
      * What is supplied here is exactly what a live run cannot share with the fixture: the devnet
-     * issuer key, the real clock, the facilitator as the observation source, and no record
-     * identifier, because a run that happened once has no bytes to reproduce.
+     * issuer key, the real clock, the observed request, the facilitator as the observation source,
+     * and no record identifier, because a run that happened once has no bytes to reproduce.
      */
     const observedAtUnixSeconds = Math.floor(Date.now() / 1000);
     const observationSource: ObservationSource = {
@@ -215,10 +230,16 @@ export async function main(): Promise<void> {
     };
     const paymentReference = extractPaymentIdentifier(result.paymentPayload);
     const layout = await buildEvidence(
-      { client: result, challenge, origin, terminalState: origin.lifecycle.terminalState },
+      {
+        client: result,
+        challenge,
+        origin,
+        terminalState: origin.lifecycle.terminalState,
+        listenerAuthority: `${address}:${port}`,
+      },
       {
         mode: 'devnet',
-        resourceUrl: RESOURCE_URL,
+        requestIdentity: { kind: 'observed', components },
         requestBody: new Uint8Array(0),
         observedAtUnixSeconds,
         observationSource,

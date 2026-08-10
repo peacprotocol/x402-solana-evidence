@@ -33,6 +33,13 @@ import {
 /** Fixed instant so binding digests are reproducible across runs. */
 export const FIXED_NOW_UNIX_SECONDS = 1_785_000_000;
 
+/**
+ * The fixed SYNTHETIC resource identity the deterministic fixture binds.
+ *
+ * It corresponds to no socket, no listener and no deployment. It exists so the fixture reproduces
+ * byte for byte against an ephemeral port, and it is never an observation: a live run binds the
+ * request components its origin actually served instead.
+ */
 export const RESOURCE_URL = 'https://api.example.test/v1/forecast?region=alpha&units=metric';
 
 /** CAIP-2 for Solana devnet, taken from the upstream constant rather than transcribed. */

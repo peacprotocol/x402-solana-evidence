@@ -147,8 +147,16 @@ lifecycle it reached and the transaction reference.
 
 It then emits evidence, through the same capture, binding, issuance and verification code the
 offline run uses. Only the inputs that genuinely differ are supplied: the devnet issuer key from
-`.local/keys/issuer.json`, the real clock, the configured facilitator as the observation source, and
-no supplied record identifier, because a run that happened once has no bytes to reproduce.
+`.local/keys/issuer.json`, the real clock, the request the origin observed, the configured
+facilitator as the observation source, and no supplied record identifier, because a run that
+happened once has no bytes to reproduce.
+
+The request binding of a live run describes the request that was actually served, taken from the
+socket it arrived on: the scheme, the authority including the ephemeral port the origin was
+listening on, and the origin-form target exactly as received. The fixture run cannot do that and
+does not pretend to; it binds a fixed synthetic resource identity so its bytes reproduce, and says
+so in `determinism-note.txt`. The resource URL advertised in the x402 payment requirements is a
+separate, x402-owned field and stays the configured value in both modes.
 
 Evidence is written to `out/<runId>/`, where `runId` is the instant the run was observed. That
 directory is gitignored: it describes one run rather than a fixture. It does not write into

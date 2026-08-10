@@ -53,7 +53,13 @@ import {
 } from './flow/fixture-facilitator.ts';
 import { FixtureExactWallet } from './flow/fixture-wallet.ts';
 import { createPaidResource, type OriginResult, type RequestObservation } from './flow/server.ts';
-import { buildEvidence, RESOURCE_PATH, RESOURCE_QUERY, runOnce } from './flow/fixture-e2e.ts';
+import {
+  buildEvidence,
+  FIXTURE_EVIDENCE_OPTIONS,
+  RESOURCE_PATH,
+  RESOURCE_QUERY,
+  runOnce,
+} from './flow/fixture-e2e.ts';
 import { writeEvidence, type EvidenceLayout } from './flow/issue-record.ts';
 import { resolveIssuerKey } from './flow/issuer-key.ts';
 import {
@@ -651,6 +657,62 @@ recordExecution('SVM-BIND-004');
     failedExactly(report, ['request binding digest']),
     failedChecks(report).join(', ') || 'nothing failed',
   );
+}
+
+/**
+ * SVM-BIND-005. What a live-shaped run binds: the request the origin actually served.
+ *
+ * The fixture binds a fixed synthetic resource identity, which is the right thing for bytes that
+ * have to reproduce and the wrong thing for a run that really happened. A live run therefore binds
+ * the components the origin captured, and the authority in them has to be the one that was serving,
+ * ephemeral port included. The listener's own address is read from the listener rather than from
+ * the request, so the two sides of the comparison do not come from the same place.
+ */
+recordExecution('SVM-BIND-005');
+{
+  const run = await runOnce();
+  const observed = run.origin.components;
+  check(
+    'the origin captured components for the request it served',
+    observed !== undefined,
+    'the request target was refused by the component profile',
+  );
+  if (observed !== undefined) {
+    const layout = await buildEvidence(run, {
+      ...FIXTURE_EVIDENCE_OPTIONS,
+      requestIdentity: { kind: 'observed', components: observed },
+    });
+    const binding = JSON.parse(
+      decoder.decode(layout.files.get('request-binding.json')),
+    ) as PaymentEvidenceRequestBindingV1;
+    const authority = binding.components['@authority'];
+
+    check(
+      'the binding names the authority that actually served the request',
+      authority === run.listenerAuthority,
+      `bound ${authority}, listener ${run.listenerAuthority}`,
+    );
+    check(
+      'that authority carries the real listening port, not a configured one',
+      /^127\.0\.0\.1:[1-9][0-9]*$/.test(authority),
+      authority,
+    );
+    check(
+      'it is not the fixture identity, which no socket produced',
+      authority !== 'api.example.test',
+      authority,
+    );
+
+    const directory = mkdtempSync(join(tmpdir(), 'peac-evidence-'));
+    temporaryDirectories.push(directory);
+    writeEvidence(directory, layout);
+    const report = await verifyEvidence(directory, issuerKey.publicKey);
+    check(
+      'evidence bound to the observed request verifies from the directory and a key alone',
+      report.ok,
+      failedChecks(report).join(', ') || 'nothing failed',
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------------------------

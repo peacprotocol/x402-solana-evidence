@@ -17,8 +17,12 @@ One input is derived from the process clock and cannot be supplied:
   The signature covers iat, so without this the record bytes, and only the record bytes,
   would differ between runs.
 
-The listening port is not fixed and does not need to be: no bound value derives from it.
-The resource is identified by its configured URL, not by the loopback address.
+The listening port is not fixed and does not need to be, because this run binds a fixed
+SYNTHETIC resource identity rather than the address it was served on. That identity
+corresponds to no socket and no deployment; it exists so these bytes reproduce.
+
+A live run binds the opposite: the request components the origin observed, including the
+real authority and port it was serving on. Nothing in this directory describes a live run.
 
 This evidence describes an offline run. No payment occurred, no facilitator or node was
 contacted, and the transaction reference is placeholder text.

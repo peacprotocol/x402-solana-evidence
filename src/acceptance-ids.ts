@@ -87,6 +87,7 @@ export const ACCEPTANCE_CASES = {
   'SVM-BIND-002': { description: 'the same path with a changed query fails request binding', scope: 'local' },
   'SVM-BIND-003': { description: 'an altered origin result fails result binding', scope: 'local' },
   'SVM-BIND-004': { description: 'a valid native artifact with an incorrect binding fails at the binding stage', scope: 'local' },
+  'SVM-BIND-005': { description: 'an observed-request binding names the authority that actually served the request', scope: 'local' },
   'SVM-TAMPER-001': { description: 'a tampered result digest fails at the expected stage', scope: 'local' },
   'SVM-TAMPER-002': { description: 'a tampered observed field value fails its binding digest', scope: 'local' },
   'SVM-TAMPER-003': { description: 'a tampered record payload fails local verification with an invalid signature', scope: 'local' },

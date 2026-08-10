@@ -24,6 +24,7 @@
  * buffered response and says so rather than appearing to support both.
  */
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { isIP, type Socket } from 'node:net';
 import express, { type Express, type Request, type Response } from 'express';
 import { paymentMiddlewareFromHTTPServer } from '@x402/express';
 import {
@@ -33,6 +34,11 @@ import {
   type RouteConfig,
 } from '@x402/core/server';
 import type { Network } from '@x402/core/types';
+import {
+  captureRequestComponents,
+  ComponentError,
+  type HttpRequestComponentsV1,
+} from '../components.ts';
 import { LifecycleRecorder, type LifecycleObservation } from './lifecycle.ts';
 
 /** The bytes an origin handler produced, before any transfer encoding. */
@@ -56,6 +62,13 @@ export interface RequestObservation {
   };
   /** The bytes the handler produced, present only when the handler ran. */
   readonly originResult?: OriginResult;
+  /**
+   * RFC 9421 components of this request, as the origin observed it.
+   *
+   * Absent only when the request target is one this profile refuses to describe, which is a
+   * rejection rather than an omission: a caller must not fall back to some other identity for it.
+   */
+  readonly components?: HttpRequestComponentsV1;
 }
 
 export interface PaidResourceOptions {
@@ -86,6 +99,47 @@ export interface PaidResource {
 interface RequestState {
   readonly recorder: LifecycleRecorder;
   originResult?: OriginResult;
+}
+
+/**
+ * The authority this origin was actually serving on.
+ *
+ * Read from the socket the request arrived on, never from `Host` or an `X-Forwarded-*` value.
+ * Under the direct-origin trust profile those are client-controlled, so repeating one would let a
+ * caller decide what the evidence says the operation was. The socket's local address and port are
+ * the origin's own, and on an ephemeral port they are the only place the real port exists.
+ */
+function observedAuthority(socket: Socket): string {
+  const local = socket.localAddress ?? '';
+  // A dual-stack socket reports an IPv4 peer in IPv4-mapped form. The listener holds the IPv4
+  // address, so it is recorded as that rather than as an IPv6 literal describing the same host.
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(local);
+  const host = mapped?.[1] ?? local;
+  const literal = isIP(host) === 6 ? `[${host}]` : host;
+  return socket.localPort === undefined ? literal : `${literal}:${socket.localPort}`;
+}
+
+/**
+ * Capture the request as components, or record that it could not be described.
+ *
+ * The scheme comes from whether the socket is a TLS socket, and the target is the origin-form
+ * target exactly as received. Nothing is reassembled from an absolute URL, because a URL parser
+ * normalises and the normalised operation is not the one that was requested.
+ */
+function captureComponents(req: Request): HttpRequestComponentsV1 | undefined {
+  try {
+    return captureRequestComponents({
+      method: req.method,
+      scheme: (req.socket as { encrypted?: boolean }).encrypted === true ? 'https' : 'http',
+      authority: observedAuthority(req.socket),
+      rawPathAndQuery: req.originalUrl,
+      proxyTrustProfile: 'direct-origin',
+    });
+  } catch (error) {
+    if (!(error instanceof ComponentError)) throw error;
+    // A target this profile refuses is left undescribed rather than described approximately.
+    return undefined;
+  }
 }
 
 /** Reads a response header as a single string, which is how the x402 field values are set. */
@@ -195,6 +249,8 @@ export async function createPaidResource(options: PaidResourceOptions): Promise<
       const queryIndex = req.originalUrl.indexOf('?');
       const query = queryIndex === -1 ? '?' : req.originalUrl.slice(queryIndex);
       const observedSignature = req.get('payment-signature');
+      // Captured now, while the socket the request arrived on is still the one in hand.
+      const components = captureComponents(req);
 
       res.on('finish', () => {
         const reached = recorder.observation();
@@ -233,6 +289,7 @@ export async function createPaidResource(options: PaidResourceOptions): Promise<
               : {}),
           },
           ...(requestState.originResult ? { originResult: requestState.originResult } : {}),
+          ...(components !== undefined ? { components } : {}),
         });
       });
 
