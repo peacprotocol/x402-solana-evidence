@@ -48,10 +48,21 @@ jobs:
       - name: Offline end-to-end flow
         run: pnpm test:flow
 
+      # Security, replay, binding and tamper cases. Deterministic and loopback-only, like every
+      # other job in this matrix: it starts an origin, presents altered payments to it, and edits
+      # copies of the evidence in a temporary directory.
+      - name: Security, replay, binding and tamper matrix
+        run: pnpm test:svm
+
       # The committed evidence is verified from the directory and a public key alone, which is the
       # position a reader of this repository is in.
       - name: Verify the committed offline evidence
         run: pnpm verify
+
+      # The demonstration exits non-zero if an edited copy verifies, so this also guards the
+      # verifier against silently accepting a tampered directory.
+      - name: Tamper demonstration
+        run: pnpm tamper-demo
 
       - name: Acceptance matrix completeness
         run: pnpm test:acceptance

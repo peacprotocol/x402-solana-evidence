@@ -67,22 +67,30 @@ export const ACCEPTANCE_CASES = {
   'SVM-LIFE-002': { description: 'handler threw: cancellation, no settlement', scope: 'local' },
   'SVM-LIFE-003': { description: 'handler returned an error status: cancellation, no settlement', scope: 'local' },
   'SVM-LIFE-004': { description: 'resource executed and settlement failed: recorded as never written', scope: 'local' },
-  'SVM-SEC-001': { description: 'the fee payer cannot become the transfer authority or source', scope: 'planned' },
-  'SVM-SEC-002': { description: 'a destination other than the configured recipient is rejected', scope: 'planned' },
-  'SVM-SEC-003': { description: 'an amount other than the exact requirement is rejected', scope: 'planned' },
-  'SVM-SEC-004': { description: 'a different asset is rejected', scope: 'planned' },
-  'SVM-SEC-005': { description: 'a different network is rejected', scope: 'planned' },
-  'SVM-REPLAY-001': { description: 'a duplicate payment identifier behaves as declared', scope: 'planned' },
-  'SVM-REPLAY-002': { description: 'a second settlement of the same payment is refused or idempotent', scope: 'planned' },
-  'SVM-BIND-001': { description: 'a payment bound to one resource fails request binding against another', scope: 'planned' },
-  'SVM-BIND-002': { description: 'the same path with a changed query fails request binding', scope: 'planned' },
-  'SVM-BIND-003': { description: 'an altered origin result fails result binding', scope: 'planned' },
-  'SVM-BIND-004': { description: 'a valid native artifact with an incorrect binding fails at the binding stage', scope: 'planned' },
-  'SVM-TAMPER-001': { description: 'a tampered result digest fails at the expected stage', scope: 'planned' },
-  'SVM-TAMPER-002': { description: 'a tampered observed field value fails its binding digest', scope: 'planned' },
-  'SVM-TAMPER-003': { description: 'a tampered record payload fails local verification with an invalid signature', scope: 'planned' },
-  'SVM-TAMPER-004': { description: 'a valid native artifact with an invalid record binding fails at the binding stage', scope: 'planned' },
-  'SVM-TAMPER-005': { description: 'a valid record with a missing native artifact fails the presence contract', scope: 'planned' },
+  /**
+   * NARROWED, and the description says so rather than the claim being quietly widened later.
+   * Whether a fee payer is isolated from the transfer it pays for is decided by the upstream SVM
+   * facilitator against a real transaction. The offline path has no such transaction, and
+   * rebuilding that machinery would test upstream rather than this integration, so what is
+   * asserted here is the property this integration owns: the fee payer stays a role and never
+   * becomes a party to the payment.
+   */
+  'SVM-SEC-001': { description: 'the fee payer stays a distinct role and never becomes the payer or the recipient', scope: 'local' },
+  'SVM-SEC-002': { description: 'a destination other than the configured recipient is rejected', scope: 'local' },
+  'SVM-SEC-003': { description: 'an amount other than the exact requirement is rejected', scope: 'local' },
+  'SVM-SEC-004': { description: 'a different asset is rejected', scope: 'local' },
+  'SVM-SEC-005': { description: 'a different network is rejected', scope: 'local' },
+  'SVM-REPLAY-001': { description: 'a repeated payment identifier is not refused at this layer and stays visible in the evidence', scope: 'local' },
+  'SVM-REPLAY-002': { description: 'a second settlement of the same payment is refused or idempotent', scope: 'local' },
+  'SVM-BIND-001': { description: 'a payment bound to one resource fails request binding against another', scope: 'local' },
+  'SVM-BIND-002': { description: 'the same path with a changed query fails request binding', scope: 'local' },
+  'SVM-BIND-003': { description: 'an altered origin result fails result binding', scope: 'local' },
+  'SVM-BIND-004': { description: 'a valid native artifact with an incorrect binding fails at the binding stage', scope: 'local' },
+  'SVM-TAMPER-001': { description: 'a tampered result digest fails at the expected stage', scope: 'local' },
+  'SVM-TAMPER-002': { description: 'a tampered observed field value fails its binding digest', scope: 'local' },
+  'SVM-TAMPER-003': { description: 'a tampered record payload fails local verification with an invalid signature', scope: 'local' },
+  'SVM-TAMPER-004': { description: 'a valid native artifact with an invalid record binding fails at the binding stage', scope: 'local' },
+  'SVM-TAMPER-005': { description: 'a valid record with a missing native artifact fails the presence contract', scope: 'local' },
   'SVM-DET-001': { description: 'the offline end-to-end run produces byte-identical evidence across runs', scope: 'ci-external' },
   'SVM-NET-001': { description: 'the offline end-to-end run passes in a job with networking disabled', scope: 'ci-external' },
 } as const satisfies Record<string, AcceptanceCase>;

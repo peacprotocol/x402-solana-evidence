@@ -13,6 +13,7 @@
  * a payment occurred, and no output derived from it may be presented as a settled payment.
  */
 import { x402Facilitator } from '@x402/core/facilitator';
+import { SettlementCache } from '@x402/svm';
 import type { FacilitatorClient } from '@x402/core/server';
 import type {
   Network,
@@ -32,6 +33,21 @@ export interface FixtureFacilitatorBehavior {
   /** Accept verification and refuse settlement, which is the branch that produces state F4. */
   readonly rejectSettlement?: string;
 }
+
+/**
+ * How often the resource server actually asked this facilitator.
+ *
+ * Counted because "the payment was refused" and "the payment was refused before anyone was asked to
+ * verify it" are different facts, and only the second shows that the refusal came from the
+ * requirements matching the resource server performs before verification.
+ */
+export interface FixtureFacilitatorCalls {
+  verify: number;
+  settle: number;
+}
+
+/** Reason a settlement was refused because the same payment had already been settled. */
+export const DUPLICATE_SETTLEMENT_REASON = 'duplicate_settlement';
 
 /**
  * Checks a payment against the requirements the server advertised.
@@ -66,7 +82,20 @@ class FixtureExactSvmFacilitator implements SchemeNetworkFacilitator {
   readonly scheme = 'exact';
   readonly caipFamily = 'solana:*';
 
-  constructor(private readonly behavior: FixtureFacilitatorBehavior) {}
+  /**
+   * Duplicate settlements are refused by the upstream `SettlementCache` from `@x402/svm`, which is
+   * instantiated here rather than reimplemented. The upstream component documents that the check
+   * and insert must happen before the first await in the settle path, which is where it sits.
+   *
+   * The cache belongs to one facilitator instance, so it dedupes within a run and never carries
+   * state between runs.
+   */
+  private readonly settlementCache = new SettlementCache();
+
+  constructor(
+    private readonly behavior: FixtureFacilitatorBehavior,
+    private readonly calls: FixtureFacilitatorCalls,
+  ) {}
 
   getExtra(): Record<string, unknown> {
     return { feePayer: F.FEE_PAYER };
@@ -80,6 +109,7 @@ class FixtureExactSvmFacilitator implements SchemeNetworkFacilitator {
     payload: PaymentPayload,
     requirements: PaymentRequirements,
   ): Promise<VerifyResponse> {
+    this.calls.verify++;
     if (this.behavior.rejectVerification !== undefined) {
       return { isValid: false, invalidReason: this.behavior.rejectVerification };
     }
@@ -92,6 +122,17 @@ class FixtureExactSvmFacilitator implements SchemeNetworkFacilitator {
     payload: PaymentPayload,
     requirements: PaymentRequirements,
   ): Promise<SettleResponse> {
+    this.calls.settle++;
+    const transaction = payload.payload['transaction'];
+    if (typeof transaction === 'string' && this.settlementCache.isDuplicate(transaction)) {
+      return {
+        success: false,
+        errorReason: DUPLICATE_SETTLEMENT_REASON,
+        transaction: '',
+        network: requirements.network,
+        payer: F.PAYER,
+      };
+    }
     if (this.behavior.rejectSettlement !== undefined) {
       return {
         success: false,
@@ -120,25 +161,43 @@ class FixtureExactSvmFacilitator implements SchemeNetworkFacilitator {
   }
 }
 
+/** An in-process facilitator client together with a record of what it was asked to do. */
+export interface FixtureFacilitator {
+  readonly client: FacilitatorClient;
+  readonly calls: FixtureFacilitatorCalls;
+}
+
 /**
- * Build the in-process facilitator client.
+ * Build the in-process facilitator.
  *
  * `getSupported` is what the resource server calls during initialization to learn which
  * scheme and network combinations exist and which fee payer signs. Answering it locally is the
  * whole reason the offline run needs no socket.
  */
+export function createFixtureFacilitator(
+  network: Network,
+  behavior: FixtureFacilitatorBehavior = {},
+): FixtureFacilitator {
+  const calls: FixtureFacilitatorCalls = { verify: 0, settle: 0 };
+  const facilitator = new x402Facilitator().register(
+    network,
+    new FixtureExactSvmFacilitator(behavior, calls),
+  );
+  return {
+    client: {
+      verify: (payload, requirements) => facilitator.verify(payload, requirements),
+      settle: (payload, requirements) => facilitator.settle(payload, requirements),
+      getSupported: async (): Promise<SupportedResponse> =>
+        facilitator.getSupported() as SupportedResponse,
+    },
+    calls,
+  };
+}
+
+/** The client alone, for callers that do not need to observe what the facilitator was asked. */
 export function createFixtureFacilitatorClient(
   network: Network,
   behavior: FixtureFacilitatorBehavior = {},
 ): FacilitatorClient {
-  const facilitator = new x402Facilitator().register(
-    network,
-    new FixtureExactSvmFacilitator(behavior),
-  );
-  return {
-    verify: (payload, requirements) => facilitator.verify(payload, requirements),
-    settle: (payload, requirements) => facilitator.settle(payload, requirements),
-    getSupported: async (): Promise<SupportedResponse> =>
-      facilitator.getSupported() as SupportedResponse,
-  };
+  return createFixtureFacilitator(network, behavior).client;
 }
