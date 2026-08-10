@@ -212,6 +212,7 @@ anything is not observable from here, which is why the successful terminal state
 
 | Branch | Terminal state | What happened |
 |---|---|---|
+| F0 | `payment_rejected_pre_verification` | A payment was presented whose terms do not match the advertised requirements. The resource server refused it and the facilitator was never asked. |
 | F1 | `verification_rejected` | The payment was refused. The handler never ran. |
 | F2 | `handler_threw` | The middleware reported that the handler threw. |
 | F3 | `handler_error_status` | The handler returned an error status. Canceled without settling. |
@@ -219,8 +220,13 @@ anything is not observable from here, which is why the successful terminal state
 | F5 | `response_write_failed` | Settlement succeeded and writing the response failed. |
 | F6 | (not a lifecycle state) | A bound document was modified after the fact. This is the tamper class, caught by verification rather than by the lifecycle. |
 
-Two measured details, stated because they change what the evidence can distinguish:
+Three measured details, stated because they change what the evidence can distinguish:
 
+- **F0 is derived, not reported.** No hook fires when the resource server refuses a payment during
+  requirements matching, and the facilitator is never asked, so the state is derived from what was
+  observed: a payment field was presented, the run finished, and no verification hook ever fired.
+  The name stays generic because the reason for the refusal is not exposed to anything this flow
+  observes, and naming one would be a claim the origin cannot support.
 - **F2 is not reachable through express.** Express catches a throw from a route handler and turns
   it into an error response before the payment middleware sees it, so the middleware reports both a
   throw and an error status through the same cancellation reason and they are told apart by the
@@ -238,16 +244,16 @@ run never produced that artifact" from "someone removed it". Each terminal state
 which artifacts must exist, which must not, and which are genuinely conditional. The terminal state
 is carried inside the signed record, so it cannot be edited to excuse a missing file.
 
-| Artifact | write attempted | verification rejected | handler threw | handler error status | settlement failed | write failed | challenge only |
-|---|---|---|---|---|---|---|---|
-| `record.jws` | required | required | required | required | required | required | required |
-| `request-binding.json` | required | required | required | required | required | required | required |
-| `chain-observation.json` | required | required | required | required | required | required | required |
-| `artifacts/payment-required.txt` | required | required | required | required | required | required | required |
-| `artifacts/payment-signature.txt` | required | required | required | required | required | required | absent |
-| `artifacts/payment-response.txt` | required | absent | absent | absent | optional | required | absent |
-| `origin-result-binding.json` | required | absent | absent | required | required | required | absent |
-| `origin-result-body.bin` | required | absent | absent | required | required | required | absent |
+| Artifact | write attempted | refused pre-verification | verification rejected | handler threw | handler error status | settlement failed | write failed | challenge only |
+|---|---|---|---|---|---|---|---|---|
+| `record.jws` | required | required | required | required | required | required | required | required |
+| `request-binding.json` | required | required | required | required | required | required | required | required |
+| `chain-observation.json` | required | required | required | required | required | required | required | required |
+| `artifacts/payment-required.txt` | required | required | required | required | required | required | required | required |
+| `artifacts/payment-signature.txt` | required | required | required | required | required | required | required | absent |
+| `artifacts/payment-response.txt` | required | absent | absent | absent | absent | optional | required | absent |
+| `origin-result-binding.json` | required | absent | absent | absent | required | required | required | absent |
+| `origin-result-body.bin` | required | absent | absent | absent | required | required | required | absent |
 
 `absent` is as load-bearing as `required`: a settlement artifact present in a run that recorded no
 settlement is inconsistent evidence, and the verifier says so.

@@ -204,6 +204,16 @@ export async function createPaidResource(options: PaidResourceOptions): Promise<
           recorder.enter('response_prepared');
           recorder.enter('response_write_attempted');
           recorder.finish('response_write_attempted', { responseStatus: res.statusCode });
+        } else if (
+          !recorder.hasTerminalState() &&
+          reached.states.includes('payment_payload_received') &&
+          !reached.states.includes('payment_verified')
+        ) {
+          // MEASURED, and derived rather than reported because no hook covers it: a payment field
+          // was presented, the run finished, and no verification hook ever fired, so the resource
+          // server refused the payment while matching it against the advertised requirements and
+          // the facilitator was never asked. Observed as a payment-required response.
+          recorder.finish('payment_rejected_pre_verification', { responseStatus: res.statusCode });
         } else {
           recorder.note({ responseStatus: res.statusCode });
         }

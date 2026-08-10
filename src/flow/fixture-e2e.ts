@@ -18,6 +18,7 @@
  * having been made.
  */
 import type { AddressInfo } from 'node:net';
+import type { PaymentPayload } from '@x402/core/types';
 import { SOLANA_DEVNET_CAIP2 } from '@x402/svm';
 import { registerExactSvmScheme } from '@x402/svm/exact/server';
 import {
@@ -59,6 +60,8 @@ export type HandlerBehavior = 'succeed' | 'throw' | 'error_status';
 export interface RunOptions {
   readonly facilitator?: FixtureFacilitatorBehavior;
   readonly handler?: HandlerBehavior;
+  /** Alters the built payment before it is sent, so terms the origin never advertised can be run. */
+  readonly alterPayment?: (payload: PaymentPayload) => PaymentPayload;
 }
 
 export interface RunResult {
@@ -130,6 +133,7 @@ export async function runOnce(options: RunOptions = {}): Promise<RunResult> {
         registerSchemes: (c) => {
           c.register(SOLANA_DEVNET_CAIP2, new FixtureExactWallet(F.PAYMENT_ID));
         },
+        ...(options.alterPayment !== undefined ? { alterPayment: options.alterPayment } : {}),
       },
       `${RESOURCE_PATH}${RESOURCE_QUERY}`,
     );

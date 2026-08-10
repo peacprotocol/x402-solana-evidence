@@ -20,6 +20,15 @@ export interface PaymentClientOptions {
   /** Base origin, for example `http://127.0.0.1:8080`. */
   readonly baseUrl: string;
   readonly network: Network;
+  /**
+   * Alters the payment after the upstream client built it and before it is encoded.
+   *
+   * Only the acceptance cases that present terms the origin never advertised use this. It sits
+   * here rather than inside a second client so that the altered payment travels the same encode,
+   * send and parse path as an honest one, which is the whole point of those cases: the refusal has
+   * to be the origin's decision about the payment, not an artifact of a different client.
+   */
+  readonly alterPayment?: (payload: PaymentPayload) => PaymentPayload;
 }
 
 /** One completed attempt to fetch a paid resource. */
@@ -77,7 +86,8 @@ export async function fetchPaidResource(
   const unpaidBody: unknown = await unpaid.json().catch(() => undefined);
   const paymentRequired = httpClient.getPaymentRequiredResponse(readerFor(unpaid), unpaidBody);
 
-  const paymentPayload = await httpClient.createPaymentPayload(paymentRequired);
+  const built = await httpClient.createPaymentPayload(paymentRequired);
+  const paymentPayload = options.alterPayment ? options.alterPayment(built) : built;
   const paymentHeaders = httpClient.encodePaymentSignatureHeader(paymentPayload);
   const observedSignature = Object.values(paymentHeaders)[0];
   if (observedSignature === undefined) {

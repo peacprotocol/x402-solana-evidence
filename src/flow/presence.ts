@@ -51,6 +51,22 @@ const CONTRACTS: Readonly<Record<TerminalState, PresenceContract>> = {
     'origin-result-body.bin': 'required',
   },
 
+  /**
+   * A payment was presented and the resource server refused it before verification, so nothing
+   * downstream of the requirements match ever ran.
+   *
+   * The presented payment field value is required: it is the artifact that makes the refusal
+   * legible, and a run that recorded a refusal without it would be describing something nobody can
+   * inspect. Nothing from verification onwards can exist.
+   */
+  payment_rejected_pre_verification: {
+    ...ALWAYS,
+    'artifacts/payment-signature.txt': 'required',
+    'artifacts/payment-response.txt': 'absent',
+    'origin-result-binding.json': 'absent',
+    'origin-result-body.bin': 'absent',
+  },
+
   /** F1. A payment was presented and refused, so the handler never ran. */
   verification_rejected: {
     ...ALWAYS,

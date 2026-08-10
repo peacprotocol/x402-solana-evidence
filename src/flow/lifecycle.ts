@@ -37,6 +37,16 @@ export type LifecycleState = (typeof LIFECYCLE_STATES)[number];
 export const TERMINAL_STATES = [
   /** The customer paid and the origin attempted to write the result. */
   'response_write_attempted',
+  /**
+   * A payment was presented and the resource server refused it before verification.
+   *
+   * MEASURED: when the presented payment's terms do not match the advertised requirements, the
+   * resource server answers with a payment-required response and no verification hook fires at
+   * all, so the facilitator is never asked. The name stays generic because the reason for the
+   * refusal is not exposed to any hook this flow observes, and inventing one would be a claim the
+   * origin cannot support.
+   */
+  'payment_rejected_pre_verification',
   /** F1: verification rejected. The handler never ran. */
   'verification_rejected',
   /**
@@ -95,6 +105,7 @@ export interface LifecycleObservation {
 export class LifecycleRecorder {
   private readonly seen: LifecycleState[] = [];
   private terminal: TerminalState = 'payment_required_only';
+  private terminalReported = false;
   private detail: {
     cancellationReason?: string;
     failureReason?: string;
@@ -109,7 +120,20 @@ export class LifecycleRecorder {
 
   finish(state: TerminalState, detail: LifecycleRecorder['detail'] = {}): void {
     this.terminal = state;
+    this.terminalReported = true;
     this.detail = { ...this.detail, ...detail };
+  }
+
+  /**
+   * Whether any observer reported where the run ended.
+   *
+   * The default terminal state is the challenge-only one, which is the truth for a request that
+   * carried no payment. Distinguishing "nothing reported it" from "an observer reported it" is
+   * what lets a caller tell that default apart from a run that ended without any observer being
+   * given the chance to speak, rather than inferring a position that was never observed.
+   */
+  hasTerminalState(): boolean {
+    return this.terminalReported;
   }
 
   note(detail: LifecycleRecorder['detail']): void {

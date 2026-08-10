@@ -211,6 +211,11 @@ function refusedBeforeExecution(
     calls.verify === 0 && calls.settle === 0,
     `verify ${calls.verify}, settle ${calls.settle}`,
   );
+  check(
+    `${label} is recorded as refused before verification`,
+    observation.lifecycle.terminalState === 'payment_rejected_pre_verification',
+    observation.lifecycle.terminalState,
+  );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -350,6 +355,79 @@ const passed = (report: EvidenceVerificationReport, name: string): boolean =>
       observation.payer !== feePayer &&
       observation.recipient !== feePayer,
     `recipient ${String(observation.recipient)}, payer ${String(observation.payer)}`,
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Lifecycle: a refusal that happens before verification is still evidence.
+// ---------------------------------------------------------------------------------------------
+
+console.log('\n  -- lifecycle: refused before verification --');
+
+/**
+ * SVM-LIFE-005. The whole path, end to end, for a payment the origin refused before verification.
+ *
+ * The cases above establish that altered terms are refused. This one establishes the thing that
+ * matters afterwards: the refusal is itself a recordable outcome. It runs the same altered-terms
+ * path they do, through the same client, and then does everything the successful run does with it:
+ * builds the bindings, issues a record, writes an evidence directory and verifies that directory
+ * from the files and a public key alone.
+ *
+ * The chain observation describes the terms the refused payment named, not the terms the origin
+ * advertised, because that is what was presented and what was refused. Nothing about settlement is
+ * recorded, since none was reached.
+ */
+recordExecution('SVM-LIFE-005');
+{
+  const refusedRun = await runOnce({
+    alterPayment: (payload) => ({ ...payload, accepted: { ...payload.accepted, amount: '1' } }),
+  });
+  check(
+    'a payment naming a smaller amount ends in the pre-verification refusal state',
+    refusedRun.terminalState === 'payment_rejected_pre_verification',
+    refusedRun.terminalState,
+  );
+  check(
+    'the refused run reached neither verification nor settlement, and produced no result',
+    !refusedRun.origin.lifecycle.states.includes('payment_verified') &&
+      !refusedRun.origin.lifecycle.states.includes('payment_settled') &&
+      refusedRun.origin.originResult === undefined,
+    refusedRun.origin.lifecycle.states.join(' -> '),
+  );
+
+  const refusedLayout = await buildEvidence(refusedRun);
+  const directory = mkdtempSync(join(tmpdir(), 'peac-evidence-'));
+  temporaryDirectories.push(directory);
+  writeEvidence(directory, refusedLayout);
+
+  const report = await verifyEvidence(directory, issuerKey.publicKey);
+  check(
+    'the evidence for the refusal verifies from the directory and a public key alone',
+    report.ok,
+    failedChecks(report).join(', ') || 'nothing failed',
+  );
+  check(
+    'the presence contract holds for the pre-verification refusal state',
+    passed(report, 'artifact presence contract'),
+  );
+  check(
+    'the record carries the presented payment field value and nothing from settlement onwards',
+    refusedLayout.files.has('artifacts/payment-signature.txt') &&
+      !refusedLayout.files.has('artifacts/payment-response.txt') &&
+      !refusedLayout.files.has('origin-result-binding.json') &&
+      !refusedLayout.files.has('origin-result-body.bin'),
+    [...refusedLayout.files.keys()].join(', '),
+  );
+
+  const refusedObservation = JSON.parse(
+    decoder.decode(refusedLayout.files.get('chain-observation.json')),
+  ) as { terminalState?: string; settlementOutcome?: string; transactionSignature?: string };
+  check(
+    'the observation records the refusal, no settlement outcome and no transaction',
+    refusedObservation.terminalState === 'payment_rejected_pre_verification' &&
+      refusedObservation.settlementOutcome === 'not_reached' &&
+      refusedObservation.transactionSignature === undefined,
+    `${String(refusedObservation.terminalState)}, ${String(refusedObservation.settlementOutcome)}`,
   );
 }
 
