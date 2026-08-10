@@ -30,12 +30,18 @@ export type LifecycleState = (typeof LIFECYCLE_STATES)[number];
 /**
  * Where a run ended.
  *
- * `response_write_attempted` is the only state in which the customer both paid and received the
- * result. The rest are the failure branches; each is a legitimate outcome to record, and none of
- * them is an error in the evidence.
+ * `response_write_attempted` is the only state in which settlement succeeded and the origin then
+ * attempted to write the result. Whether the customer received it is not observable from here and
+ * is not claimed. The rest are the failure branches; each is a legitimate outcome to record, and
+ * none of them is an error in the evidence.
+ *
+ * ONLY WHAT THIS FLOW CAN OBSERVE. Every state below is reachable and exercised through the
+ * express path this example runs. Distinctions the transport erases are not carried here as signed
+ * values: a state nothing can produce would be an unfalsifiable field in the record, and a reader
+ * has no way to tell one that never occurred from one that cannot occur.
  */
 export const TERMINAL_STATES = [
-  /** The customer paid and the origin attempted to write the result. */
+  /** Settlement succeeded and the origin attempted to write the result. */
   'response_write_attempted',
   /**
    * A payment was presented and the resource server refused it before verification.
@@ -50,20 +56,15 @@ export const TERMINAL_STATES = [
   /** F1: verification rejected. The handler never ran. */
   'verification_rejected',
   /**
-   * F2: the middleware reported that the handler threw.
+   * F2: the handler failed, so the verified payment was canceled without settling.
    *
-   * MEASURED: an express route handler cannot reach this state, because express catches the throw
-   * and turns it into an error response before the middleware observes it, which arrives as the
-   * state below. The state is kept because the middleware defines the cancellation reason and
-   * another transport can produce it; it is never claimed as exercised here.
+   * MEASURED: express catches a throw from a route handler and turns it into an error response
+   * before the payment middleware sees it, so a throw and a returned error status arrive as the
+   * same cancellation reason and are told apart by the status alone. This one state covers both.
    */
-  'handler_threw',
-  /** F3: the handler produced an error status. Canceled without settling. */
   'handler_error_status',
-  /** F4: the resource was produced and settlement failed. The result was never written. */
+  /** F3: the resource was produced and settlement failed. The result was never written. */
   'settlement_failed',
-  /** F5: settlement succeeded and writing the response failed. */
-  'response_write_failed',
   /** No payment was presented, so the challenge is the whole run. */
   'payment_required_only',
 ] as const;
@@ -76,7 +77,7 @@ export function originResultWasWritten(state: TerminalState): boolean {
 
 /** Whether a terminal state means settlement succeeded. */
 export function paymentWasSettled(state: TerminalState): boolean {
-  return state === 'response_write_attempted' || state === 'response_write_failed';
+  return state === 'response_write_attempted';
 }
 
 /** One observation of the lifecycle, as seen from a named vantage point. */

@@ -77,19 +77,7 @@ const CONTRACTS: Readonly<Record<TerminalState, PresenceContract>> = {
   },
 
   /**
-   * F2. The handler threw, so it produced no result to bind, and the payment was canceled before
-   * settlement.
-   */
-  handler_threw: {
-    ...ALWAYS,
-    'artifacts/payment-signature.txt': 'required',
-    'artifacts/payment-response.txt': 'absent',
-    'origin-result-binding.json': 'absent',
-    'origin-result-body.bin': 'absent',
-  },
-
-  /**
-   * F3. The handler produced an error result, which is released to the client, so it is bound. The
+   * F2. The handler produced an error result, which is written to the client, so it is bound. The
    * payment was still canceled before settlement.
    */
   handler_error_status: {
@@ -101,9 +89,9 @@ const CONTRACTS: Readonly<Record<TerminalState, PresenceContract>> = {
   },
 
   /**
-   * F4. The resource was produced and settlement refused, so the middleware discarded the buffered
-   * result and the client received an error instead. The result binding is required precisely
-   * because the work happened; the chain observation records that it was never written.
+   * F3. The resource was produced and settlement refused, so the middleware discarded the buffered
+   * result and wrote an error response instead. The result binding is required precisely because
+   * the work happened; the chain observation records that the result was never written.
    *
    * The settlement field value is optional because the middleware emits the failure response's
    * headers, and whether a settlement field appears among them depends on the failure. Recording
@@ -113,15 +101,6 @@ const CONTRACTS: Readonly<Record<TerminalState, PresenceContract>> = {
     ...ALWAYS,
     'artifacts/payment-signature.txt': 'required',
     'artifacts/payment-response.txt': 'optional',
-    'origin-result-binding.json': 'required',
-    'origin-result-body.bin': 'required',
-  },
-
-  /** F5. Settlement succeeded and the write failed. Everything up to the write exists. */
-  response_write_failed: {
-    ...ALWAYS,
-    'artifacts/payment-signature.txt': 'required',
-    'artifacts/payment-response.txt': 'required',
     'origin-result-binding.json': 'required',
     'origin-result-body.bin': 'required',
   },

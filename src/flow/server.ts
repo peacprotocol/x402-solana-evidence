@@ -161,15 +161,15 @@ export async function createPaidResource(options: PaidResourceOptions): Promise<
     .onVerifiedPaymentCanceled(async (context) => {
       const recorder = state()?.recorder;
       recorder?.enter('resource_executed');
-      recorder?.finish(
-        context.reason === 'handler_threw' ? 'handler_threw' : 'handler_error_status',
-        {
-          cancellationReason: context.reason,
-          ...(context.responseStatus !== undefined
-            ? { responseStatus: context.responseStatus }
-            : {}),
-        },
-      );
+      // One state for both handler failures. Express normalizes a throw into an error response
+      // before the middleware sees it, so the reason it reports does not separate them; the
+      // reason it did report is recorded verbatim beside the status.
+      recorder?.finish('handler_error_status', {
+        cancellationReason: context.reason,
+        ...(context.responseStatus !== undefined
+          ? { responseStatus: context.responseStatus }
+          : {}),
+      });
     });
 
   const routePattern = `${options.method} ${options.path}`;

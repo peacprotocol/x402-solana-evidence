@@ -402,30 +402,39 @@ export async function main(): Promise<void> {
 
   /**
    * Each failure branch is a state the evidence has to be able to describe, so each is run and its
-   * terminal state and response status asserted.
+   * terminal state, cancellation reason and response status asserted.
    *
-   * A handler that throws and a handler that returns an error status reach the same terminal
-   * state, because express converts the throw into an error response before the middleware sees
-   * it. They are told apart by the status, and both cancel the verified payment without settling,
-   * which is the property that matters.
+   * A handler that throws and a handler that returns an error status reach the same terminal state
+   * under the same cancellation reason, because express converts the throw into an error response
+   * before the middleware sees it. The assertion below states that normalization rather than
+   * working around it: they are told apart by the status alone, and both cancel the verified
+   * payment without settling, which is the property that matters.
    */
   const branches: ReadonlyArray<{
     readonly label: string;
     readonly options: RunOptions;
     readonly terminal: TerminalState;
     readonly status?: number;
+    readonly cancellationReason?: string;
   }> = [
     {
       label: 'verification rejected',
       options: { facilitator: { rejectVerification: 'synthetic_verification_refusal' } },
       terminal: 'verification_rejected',
     },
-    { label: 'handler threw', options: { handler: 'throw' }, terminal: 'handler_error_status', status: 500 },
+    {
+      label: 'handler threw',
+      options: { handler: 'throw' },
+      terminal: 'handler_error_status',
+      status: 500,
+      cancellationReason: 'handler_failed',
+    },
     {
       label: 'handler error status',
       options: { handler: 'error_status' },
       terminal: 'handler_error_status',
       status: 503,
+      cancellationReason: 'handler_failed',
     },
     {
       label: 'settlement failed',
@@ -448,6 +457,15 @@ export async function main(): Promise<void> {
     if (branch.status !== undefined && lifecycle.responseStatus !== branch.status) {
       throw new Error(`expected status ${branch.status}, observed ${lifecycle.responseStatus}`);
     }
+    if (
+      branch.cancellationReason !== undefined &&
+      lifecycle.cancellationReason !== branch.cancellationReason
+    ) {
+      throw new Error(
+        `expected cancellation reason ${branch.cancellationReason}, ` +
+          `observed ${String(lifecycle.cancellationReason)}`,
+      );
+    }
     if (lifecycle.states.includes('payment_settled')) {
       throw new Error(`${branch.label} settled the payment, which it must not`);
     }
@@ -467,7 +485,7 @@ export async function main(): Promise<void> {
   console.log('\n  settlement-failure detail');
   console.log(`    origin result produced : ${settlementFailed.origin.originResult !== undefined}`);
   console.log(`    origin result written  : false`);
-  console.log(`    client received bytes  : ${wrote ? 'an error response' : 'nothing'}`);
+  console.log(`    bytes written to client: ${wrote ? 'an error response' : 'nothing'}`);
   console.log(`    payment-response field : ${capturedResponseField === undefined ? 'absent' : 'present'}`);
 
   // The evidence for the successful run is written to the committed directory, then verified from

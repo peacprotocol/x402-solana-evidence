@@ -64,7 +64,7 @@ export const ACCEPTANCE_CASES = {
   'SVM-FLOW-003': { description: 'a record is issued, verifies locally, and every digest recomputes', scope: 'local' },
   'SVM-FLOW-004': { description: 'devnet run with a real transaction signature', scope: 'live-acceptance' },
   'SVM-LIFE-001': { description: 'verification rejected: no resource execution, no settlement', scope: 'local' },
-  'SVM-LIFE-002': { description: 'handler threw: cancellation, no settlement', scope: 'local' },
+  'SVM-LIFE-002': { description: 'a throwing handler is normalized by express into the handler-error cancellation state', scope: 'local' },
   'SVM-LIFE-003': { description: 'handler returned an error status: cancellation, no settlement', scope: 'local' },
   'SVM-LIFE-004': { description: 'resource executed and settlement failed: recorded as never written', scope: 'local' },
   'SVM-LIFE-005': { description: 'a payment refused before verification produces verifiable evidence of the refusal', scope: 'local' },
