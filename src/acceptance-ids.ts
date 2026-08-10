@@ -149,6 +149,15 @@ export const ACCEPTANCE_CASES = {
   'EVID-KEY-001': { description: 'a taken output path stops the run before anything is built or sent', scope: 'local' },
   'EVID-KEY-002': { description: 'a completed emission leaves both the evidence and its verification key', scope: 'local' },
 
+  /**
+   * What a remote party says, against what this flow writes down.
+   *
+   * A failure reason is carried into a document that gets signed and published, so nothing a
+   * facilitator or an exception supplied may reach it. The captured x402 field values are a
+   * separate matter: those are observed wire artifacts and carry exactly what was sent.
+   */
+  'SAN-ERR-001': { description: 'remote failure text never reaches a persisted reason or a durable diagnostic', scope: 'local' },
+
   'EVID-TX-001': { description: 'an interrupted emission leaves no final evidence directory', scope: 'local' },
   'EVID-TX-002': { description: 'an existing evidence directory is never overwritten or written into', scope: 'local' },
 

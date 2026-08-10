@@ -23,12 +23,15 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { SOLANA_DEVNET_CAIP2 } from '@x402/svm';
 import { registerExactSvmScheme } from '@x402/svm/exact/server';
 import { beginAcceptanceSuite, recordExecution } from './acceptance-ids.ts';
 import * as F from '../fixtures/deterministic.ts';
-import { createFixtureFacilitatorClient } from './flow/fixture-facilitator.ts';
+import {
+  createFixtureFacilitatorClient,
+  DUPLICATE_SETTLEMENT_REASON,
+} from './flow/fixture-facilitator.ts';
 import { buildEvidence, FIXTURE_EVIDENCE_OPTIONS, runOnce } from './flow/fixture-e2e.ts';
 import { createPaidResource } from './flow/server.ts';
 import {
@@ -40,6 +43,8 @@ import {
   writeEvidenceTransactionally,
 } from './flow/issue-record.ts';
 import { resolveIssuerKey } from './flow/issuer-key.ts';
+import { FAILURE_REASONS, persistableFailureReason } from './flow/failure-vocabulary.ts';
+import { checkFacilitatorSupport } from './flow/preflight.ts';
 import { observeSettlement } from './flow/observe-settlement.ts';
 import {
   observeTransaction,
@@ -846,6 +851,131 @@ recordExecution('HOSTILE-EV-005');
     (verdict.report?.checks ?? []).map((c) => c.name).join(', '),
   );
   rmSync(directory, { recursive: true, force: true });
+}
+
+// ---------------------------------------------------------------------------------------------
+// What a remote party says, against what this flow writes down.
+// ---------------------------------------------------------------------------------------------
+
+console.log('\nRemote failure text, against what is persisted\n');
+
+/**
+ * SAN-ERR-001. A facilitator whose every failure carries a token and a URL.
+ *
+ * The reasons this flow persists come from a fixed vocabulary, so none of that text can reach a
+ * lifecycle reason, the chain observation, or a diagnostic that outlives the run. What the
+ * facilitator actually sent is not discarded: it stays in the captured x402 field value, which is
+ * an observed wire artifact bound by its own digest, and this case states that distinction rather
+ * than implying the bytes went away.
+ */
+recordExecution('SAN-ERR-001');
+{
+  const SECRET_TOKEN = 'tokenLEAKCANARY7';
+  const SECRET_URL = 'https://facilitator.example.test/abc?key=QUERYCANARY9';
+  const REMOTE_TEXT = `${SECRET_TOKEN} ${SECRET_URL}`;
+  const canaries = [SECRET_TOKEN, 'QUERYCANARY9', 'facilitator.example.test'];
+
+  const vocabulary = new Set<string>(FAILURE_REASONS);
+
+  const branches = [
+    { label: 'a refused verification', options: { facilitator: { rejectVerification: REMOTE_TEXT } }, reason: 'verification_rejected' },
+    { label: 'a raised verification', options: { facilitator: { throwOnVerify: REMOTE_TEXT } }, reason: 'verification_exception' },
+    { label: 'a refused settlement', options: { facilitator: { rejectSettlement: REMOTE_TEXT } }, reason: 'settlement_rejected' },
+    { label: 'a raised settlement', options: { facilitator: { throwOnSettle: REMOTE_TEXT } }, reason: 'settlement_exception' },
+  ] as const;
+
+  for (const branch of branches) {
+    const run = await runOnce(branch.options);
+    const reason = run.origin.lifecycle.failureReason;
+    check(`${branch.label} is recorded as ${branch.reason}`, reason === branch.reason, String(reason));
+    check(`${branch.label} records a term from the fixed vocabulary`, vocabulary.has(String(reason)));
+    check(
+      `${branch.label} retains nothing the facilitator supplied`,
+      canaries.every((c) => !String(reason).includes(c)),
+      String(reason),
+    );
+  }
+
+  // The refused settlement is the branch that reaches signed evidence, so it is emitted in full and
+  // everything written is scanned.
+  const refused = await runOnce({ facilitator: { rejectSettlement: REMOTE_TEXT } });
+  const layout = await buildEvidence(refused, FIXTURE_EVIDENCE_OPTIONS);
+  const directory = mkdtempSync(join(tmpdir(), 'peac-evidence-sanitized-'));
+  writeEvidence(directory, layout);
+
+  const observation = JSON.parse(
+    readFileSync(join(directory, 'chain-observation.json'), 'utf8'),
+  ) as { settlementFailureReason?: string; settlementOutcome?: string };
+  check(
+    'the chain observation records the refusal in the fixed vocabulary',
+    observation.settlementOutcome === 'refused' &&
+      observation.settlementFailureReason === 'settlement_rejected',
+    `${String(observation.settlementOutcome)}, ${String(observation.settlementFailureReason)}`,
+  );
+
+  const documents = filesUnder(directory)
+    .filter((f) => !f.includes(`artifacts${sep}`))
+    .map((f) => readFileSync(f, 'utf8'))
+    .join('\n');
+  const recordPayload = Buffer.from(
+    readFileSync(join(directory, 'record.jws'), 'utf8').trim().split('.')[1] ?? '',
+    'base64url',
+  ).toString('utf8');
+  for (const canary of canaries) {
+    check(`no derived document carries ${canary}`, !documents.includes(canary) && !recordPayload.includes(canary));
+  }
+
+  /**
+   * The other half of the same statement, said plainly.
+   *
+   * The captured settlement field value is the facilitator's own response, recorded as observed and
+   * bound by digest. That is what an observed artifact is for, and removing content from it would
+   * be falsifying the wire. The boundary this case establishes is that the reasons this flow
+   * derives and writes in its own words carry none of it.
+   */
+  const capturedResponse = readFileSync(join(directory, 'artifacts/payment-response.txt'), 'utf8');
+  const decodedResponse = Buffer.from(capturedResponse, 'base64').toString('utf8');
+  check(
+    'the captured settlement field value is the response as sent, recorded verbatim',
+    decodedResponse.includes(REMOTE_TEXT),
+    'the observed artifact no longer matches what the facilitator sent',
+  );
+  check(
+    'and it is bound by its own digest rather than restated in a derived field',
+    !documents.includes(REMOTE_TEXT),
+  );
+
+  rmSync(directory, { recursive: true, force: true });
+
+  // A supported machine code still survives, so the vocabulary bounds the reasons without erasing
+  // the ones this integration deliberately understands.
+  check(
+    'a supported machine code is kept as it was',
+    persistableFailureReason(DUPLICATE_SETTLEMENT_REASON, 'settlement_rejected') ===
+      DUPLICATE_SETTLEMENT_REASON,
+  );
+  check(
+    'a well-formed code nobody declared is not adopted',
+    persistableFailureReason('some_undeclared_code', 'settlement_rejected') === 'settlement_rejected',
+  );
+  check(
+    'and a value that is not a string becomes the derived term',
+    persistableFailureReason({ reason: 'object' }, 'verification_rejected') === 'verification_rejected',
+  );
+
+  // The preflight's own diagnostic is durable output too: it is printed and pasted into run notes.
+  const throwing = {
+    getSupported: async () => {
+      throw new Error(REMOTE_TEXT);
+    },
+  } as unknown as Parameters<typeof checkFacilitatorSupport>[0];
+  const facilitatorCheck = await checkFacilitatorSupport(throwing, SOLANA_DEVNET_CAIP2);
+  check('an unreachable facilitator is reported in stable words', facilitatorCheck.status === 'failed');
+  check(
+    'and the diagnostic echoes nothing the facilitator supplied',
+    canaries.every((c) => !facilitatorCheck.detail.includes(c)),
+    facilitatorCheck.detail,
+  );
 }
 
 // ---------------------------------------------------------------------------------------------

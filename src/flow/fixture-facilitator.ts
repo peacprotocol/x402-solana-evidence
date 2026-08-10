@@ -32,6 +32,15 @@ export interface FixtureFacilitatorBehavior {
   readonly rejectVerification?: string;
   /** Accept verification and refuse settlement, which is the branch that produces state F4. */
   readonly rejectSettlement?: string;
+  /**
+   * Raise from verification with this message, as a facilitator that failed rather than refused.
+   *
+   * A refusal is an answer; an exception is not, and the two reach different hooks. The message is
+   * supplied by the caller so a case can prove that whatever it contains is not persisted.
+   */
+  readonly throwOnVerify?: string;
+  /** Raise from settlement with this message, for the same reason. */
+  readonly throwOnSettle?: string;
 }
 
 /**
@@ -110,6 +119,7 @@ class FixtureExactSvmFacilitator implements SchemeNetworkFacilitator {
     requirements: PaymentRequirements,
   ): Promise<VerifyResponse> {
     this.calls.verify++;
+    if (this.behavior.throwOnVerify !== undefined) throw new Error(this.behavior.throwOnVerify);
     if (this.behavior.rejectVerification !== undefined) {
       return { isValid: false, invalidReason: this.behavior.rejectVerification };
     }
@@ -133,6 +143,7 @@ class FixtureExactSvmFacilitator implements SchemeNetworkFacilitator {
         payer: F.PAYER,
       };
     }
+    if (this.behavior.throwOnSettle !== undefined) throw new Error(this.behavior.throwOnSettle);
     if (this.behavior.rejectSettlement !== undefined) {
       return {
         success: false,

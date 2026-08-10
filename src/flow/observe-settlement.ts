@@ -21,6 +21,7 @@ import type { PaymentPayload, PaymentRequirements, SettleResponse } from '@x402/
 import { computeJsonDocumentDigestJcs } from '@peac/protocol';
 import type { JsonValue } from '@peac/kernel';
 import { coerceDigest, type Sha256Digest } from '../digest.ts';
+import type { FailureReason } from './failure-vocabulary.ts';
 import { paymentWasSettled, type LifecycleObservation, type TerminalState } from './lifecycle.ts';
 import type { RpcTransactionObservationV1 } from './observe-transaction.ts';
 
@@ -78,8 +79,14 @@ export interface SolanaChainObservationV1 {
   /** Where the run ended, so a reader can tell which artifacts should exist. */
   readonly terminalState: TerminalState;
   readonly settlementOutcome: SettlementOutcome;
-  /** Reason settlement refused, when it did. */
-  readonly settlementFailureReason?: string;
+  /**
+   * Why settlement refused, when it did, from the fixed vocabulary in `failure-vocabulary.ts`.
+   *
+   * This value is covered by a digest inside a signed record, so it is never text a facilitator or
+   * an exception supplied. What the facilitator actually sent is kept where it belongs: in the
+   * captured settlement field value, bound by its own digest.
+   */
+  readonly settlementFailureReason?: FailureReason;
 }
 
 /** The native artifacts one run produced, before anything network-specific is read out of them. */

@@ -39,6 +39,7 @@ import {
   ComponentError,
   type HttpRequestComponentsV1,
 } from '../components.ts';
+import { persistableFailureReason } from './failure-vocabulary.ts';
 import { LifecycleRecorder, type LifecycleObservation } from './lifecycle.ts';
 
 /** The bytes an origin handler produced, before any transfer encoding. */
@@ -186,13 +187,20 @@ export async function createPaidResource(options: PaidResourceOptions): Promise<
         recorder?.enter('payment_verified');
         recorder?.note({ payer: context.result.payer });
       } else {
+        // The facilitator's own words are never persisted. A supported machine code survives; a
+        // response body, a URL or an exception message becomes the term this flow decided.
         recorder?.finish('verification_rejected', {
-          failureReason: context.result.invalidReason ?? 'verification_rejected',
+          failureReason: persistableFailureReason(
+            context.result.invalidReason,
+            'verification_rejected',
+          ),
         });
       }
     })
     .onVerifyFailure(async (context) => {
-      state()?.recorder.finish('verification_rejected', { failureReason: context.error.message });
+      // An exception message is unbounded and remote in origin, so what is recorded is that
+      // verification raised, and nothing it said.
+      state()?.recorder.finish('verification_rejected', { failureReason: 'verification_exception' });
     })
     .onBeforeSettle(async () => {
       // Reaching settlement means the handler already ran and its output is buffered.
@@ -205,12 +213,12 @@ export async function createPaidResource(options: PaidResourceOptions): Promise<
         recorder?.note({ transaction: context.result.transaction, payer: context.result.payer });
       } else {
         recorder?.finish('settlement_failed', {
-          failureReason: context.result.errorReason ?? 'settlement_failed',
+          failureReason: persistableFailureReason(context.result.errorReason, 'settlement_rejected'),
         });
       }
     })
     .onSettleFailure(async (context) => {
-      state()?.recorder.finish('settlement_failed', { failureReason: context.error.message });
+      state()?.recorder.finish('settlement_failed', { failureReason: 'settlement_exception' });
     })
     .onVerifiedPaymentCanceled(async (context) => {
       const recorder = state()?.recorder;
@@ -219,7 +227,7 @@ export async function createPaidResource(options: PaidResourceOptions): Promise<
       // before the middleware sees it, so the reason it reports does not separate them; the
       // reason it did report is recorded verbatim beside the status.
       recorder?.finish('handler_error_status', {
-        cancellationReason: context.reason,
+        cancellationReason: persistableFailureReason(context.reason, 'handler_failed'),
         ...(context.responseStatus !== undefined
           ? { responseStatus: context.responseStatus }
           : {}),

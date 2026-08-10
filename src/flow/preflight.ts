@@ -214,8 +214,13 @@ export async function checkFacilitatorSupport(
   let supported: Awaited<ReturnType<FacilitatorClient['getSupported']>>;
   try {
     supported = await facilitatorClient.getSupported();
-  } catch (e) {
-    return failed('facilitator supports the network', (e as Error).message.split('\n')[0] ?? 'unreachable');
+  } catch {
+    // Deliberately says nothing the remote party supplied. An exception here carries a message
+    // built elsewhere, and this diagnostic is written to a terminal and kept in run notes.
+    return failed(
+      'facilitator supports the network',
+      'the configured facilitator could not be reached or did not answer',
+    );
   }
   const match = supported.kinds.find((k) => k.network === network && k.scheme === 'exact');
   return match !== undefined

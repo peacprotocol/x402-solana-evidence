@@ -14,6 +14,8 @@
  * never anything that claims delivery.
  */
 
+import type { FailureReason } from './failure-vocabulary.ts';
+
 /** Lifecycle positions, in the order the middleware reaches them. */
 export const LIFECYCLE_STATES = [
   'request_received',
@@ -85,10 +87,15 @@ export interface LifecycleObservation {
   /** Positions reached, in order, without duplicates. */
   readonly states: readonly LifecycleState[];
   readonly terminalState: TerminalState;
-  /** Reason reported by the middleware when a verified payment was canceled. */
-  readonly cancellationReason?: string;
-  /** Reason reported by verification or settlement when it refused. */
-  readonly failureReason?: string;
+  /**
+   * Why a verified payment was canceled, from the fixed vocabulary.
+   *
+   * Never text a remote party or an exception supplied: this value can be carried into a document
+   * that gets signed and published, so only declared terms reach it.
+   */
+  readonly cancellationReason?: FailureReason;
+  /** Why verification or settlement refused, from the same fixed vocabulary. */
+  readonly failureReason?: FailureReason;
   /** Transaction reference reported by settlement, when settlement succeeded. */
   readonly transaction?: string;
   /** Payer reported by verification or settlement. */
@@ -108,8 +115,8 @@ export class LifecycleRecorder {
   private terminal: TerminalState = 'payment_required_only';
   private terminalReported = false;
   private detail: {
-    cancellationReason?: string;
-    failureReason?: string;
+    cancellationReason?: FailureReason;
+    failureReason?: FailureReason;
     transaction?: string;
     payer?: string;
     responseStatus?: number;
