@@ -29,6 +29,9 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ matrix.node }}
+          # Dependencies are installed from the committed lockfile on every run, so there is
+          # nothing to gain from cache detection and one less thing to go wrong.
+          package-manager-cache: false
 
       - name: Enable pnpm from the packageManager pin
         run: corepack enable
@@ -88,6 +91,7 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24'
+          package-manager-cache: false
 
       - name: Enable pnpm from the packageManager pin
         run: corepack enable
@@ -119,12 +123,66 @@ jobs:
   secret-scan:
     name: secret scan
     runs-on: ubuntu-latest
+    env:
+      # The upstream action is deliberately not used. It requires a license key for repositories
+      # owned by an organization, and this workflow uses no secrets at all so that a fork pull
+      # request runs exactly what a branch push runs. The open source binary needs neither.
+      GITLEAKS_VERSION: '8.30.1'
+      # Published checksum for gitleaks_8.30.1_linux_x64.tar.gz. A pinned version says which
+      # release was intended; the checksum is what proves the bytes that ran are that release.
+      GITLEAKS_SHA256: '551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb'
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # Scanning history requires the history.
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Install gitleaks
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          curl -sSfL -o gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  gitleaks.tar.gz" | sha256sum -c -
+          tar xzf gitleaks.tar.gz gitleaks
+          ./gitleaks version
+
+      # Scans the full history rather than the working tree, because a credential that was
+      # committed and later deleted is still published.
+      #
+      # The result is checked rather than trusted. Upstream gitleaks aborts the scan when git
+      # writes anything to stderr, and that path can still report "no leaks found" and exit 0;
+      # a repository whose history really does contain a secret then passes silently. The two
+      # assertions below turn that outcome into a failure, so this job either scans the history
+      # or fails, and never quietly reports success without having looked.
       - name: Scan history for committed secrets
-        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        run: |
+          set -uo pipefail
+          set +e
+          "$RUNNER_TEMP/gitleaks" git . \
+            --config .gitleaks.toml \
+            --no-banner --no-color --redact \
+            --report-format json --report-path "$RUNNER_TEMP/gitleaks-report.json" 2>&1 \
+            | tee "$RUNNER_TEMP/scan.log"
+          status=${PIPESTATUS[0]}
+          set -e
+
+          if grep -q 'stderr is not empty' "$RUNNER_TEMP/scan.log"; then
+            echo "The scan aborted on git stderr output, so its result means nothing."
+            exit 1
+          fi
+
+          commits="$(sed -n 's/.*INF \([0-9][0-9]*\) commits scanned.*/\1/p' "$RUNNER_TEMP/scan.log" | tail -1)"
+          if [ -z "$commits" ] || [ "$commits" -eq 0 ]; then
+            echo "The scan walked no commits, so it proves nothing about this history."
+            exit 1
+          fi
+
+          if [ "$status" -ne 0 ]; then
+            echo "Secret scan reported findings across $commits commits."
+            exit "$status"
+          fi
+
+          echo "No findings across $commits commits."
