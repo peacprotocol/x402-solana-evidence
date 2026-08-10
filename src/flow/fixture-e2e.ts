@@ -1,0 +1,244 @@
+/**
+ * The offline end-to-end run.
+ *
+ * A real express server, the real x402 payment middleware, the real resource server and the real
+ * upstream client, wired to an in-process facilitator and a wallet stand-in so the whole lifecycle
+ * executes without a network. The server listens on the loopback interface only; nothing resolves
+ * a name, dials a remote host or reaches a chain, which is why the same run passes in a job with
+ * no network interface at all.
+ *
+ * Determinism comes from fixed inputs rather than from suppressing outputs: a fixed clock, fixed
+ * account identifiers and a fixed payment identifier. The port is the one thing that cannot be
+ * fixed, so the origin binds to an ephemeral port and no observed value derives from it: the
+ * resource identity that reaches the evidence is the configured resource URL, not the loopback
+ * address the process happened to receive.
+ *
+ * WHAT THIS RUN DOES NOT SHOW. No payment occurs. The facilitator settles nothing, the transaction
+ * reference is fixed placeholder text, and no output of this run may be presented as a payment
+ * having been made.
+ */
+import type { AddressInfo } from 'node:net';
+import { SOLANA_DEVNET_CAIP2 } from '@x402/svm';
+import { registerExactSvmScheme } from '@x402/svm/exact/server';
+import {
+  PAYMENT_IDENTIFIER,
+  declarePaymentIdentifierExtension,
+} from '@x402/extensions/payment-identifier';
+import { beginAcceptanceSuite, recordExecution } from '../acceptance-ids.ts';
+import { requireValidX402Artifact } from '../x402-header.ts';
+import * as F from '../../fixtures/deterministic.ts';
+import { createFixtureFacilitatorClient, type FixtureFacilitatorBehavior } from './fixture-facilitator.ts';
+import { FixtureExactWallet } from './fixture-wallet.ts';
+import { createPaidResource, type OriginResult, type RequestObservation } from './server.ts';
+import { fetchPaidResource, type PaidFetchResult } from './client.ts';
+import type { TerminalState } from './lifecycle.ts';
+
+/** Path of the paid resource, matching the fixture resource URL. */
+export const RESOURCE_PATH = '/v1/forecast';
+export const RESOURCE_QUERY = '?region=alpha&units=metric';
+
+/** How the origin handler should behave, so the failure branches can be reached deliberately. */
+export type HandlerBehavior = 'succeed' | 'throw' | 'error_status';
+
+export interface RunOptions {
+  readonly facilitator?: FixtureFacilitatorBehavior;
+  readonly handler?: HandlerBehavior;
+}
+
+export interface RunResult {
+  readonly client: PaidFetchResult;
+  /** The origin's view of the unpaid request, which is where the challenge was emitted. */
+  readonly challenge: RequestObservation;
+  /** The origin's view of the paid retry, which is what the evidence describes. */
+  readonly origin: RequestObservation;
+  readonly terminalState: TerminalState;
+}
+
+/**
+ * The paid result.
+ *
+ * Deliberately synthetic and free of anything sensitive, so a run can be published whole: the
+ * record, the sidecar documents and the body itself, rather than digests standing in for content
+ * nobody may see.
+ */
+function originResultFor(behavior: HandlerBehavior): OriginResult {
+  if (behavior === 'throw') throw new Error('synthetic handler failure');
+  if (behavior === 'error_status') {
+    return {
+      status: 503,
+      contentType: 'application/json',
+      body: new TextEncoder().encode(JSON.stringify({ error: 'synthetic upstream unavailable' })),
+    };
+  }
+  return {
+    status: 200,
+    contentType: 'application/json',
+    body: F.ORIGIN_RESULT_BODY,
+  };
+}
+
+/** Run one full request/challenge/pay/retry exchange against a freshly built origin. */
+export async function runOnce(options: RunOptions = {}): Promise<RunResult> {
+  const handlerBehavior = options.handler ?? 'succeed';
+  const resource = await createPaidResource({
+    facilitatorClient: createFixtureFacilitatorClient(SOLANA_DEVNET_CAIP2, options.facilitator ?? {}),
+    registerSchemes: (server) => {
+      // The genuine upstream SVM exact scheme server. With no RPC endpoint configured it embeds no
+      // blockhash and performs no lookups, so the offline run uses the real scheme rather than a
+      // stand-in on the side that matters most.
+      registerExactSvmScheme(server, { networks: [SOLANA_DEVNET_CAIP2] });
+    },
+    network: SOLANA_DEVNET_CAIP2,
+    payTo: F.PAY_TO,
+    price: { asset: F.ASSET_MINT, amount: F.AMOUNT_BASE_UNITS },
+    method: 'GET',
+    path: RESOURCE_PATH,
+    resourceUrl: F.RESOURCE_URL,
+    maxTimeoutSeconds: F.MAX_TIMEOUT_SECONDS,
+    declaredExtensions: { [PAYMENT_IDENTIFIER]: declarePaymentIdentifierExtension(true) },
+    handler: () => originResultFor(handlerBehavior),
+  });
+
+  const server = resource.app.listen(0, '127.0.0.1');
+  await new Promise<void>((resolve, reject) => {
+    server.once('listening', () => resolve());
+    server.once('error', reject);
+  });
+  const { port } = server.address() as AddressInfo;
+
+  try {
+    const client = await fetchPaidResource(
+      {
+        baseUrl: `http://127.0.0.1:${port}`,
+        network: SOLANA_DEVNET_CAIP2,
+        registerSchemes: (c) => {
+          c.register(SOLANA_DEVNET_CAIP2, new FixtureExactWallet(F.PAYMENT_ID));
+        },
+      },
+      `${RESOURCE_PATH}${RESOURCE_QUERY}`,
+    );
+    // Two requests reach the protected route: the unpaid challenge, which carries the
+    // payment-required value, and the paid retry, which is what the evidence describes.
+    if (resource.observations.length !== 2) {
+      throw new Error(`expected two origin observations, recorded ${resource.observations.length}`);
+    }
+    const [challenge, origin] = resource.observations as readonly [
+      RequestObservation,
+      RequestObservation,
+    ];
+    return { client, challenge, origin, terminalState: origin.lifecycle.terminalState };
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+}
+
+/** Entry point for `demo:fixture`. Prints the run and records the cases it exercised. */
+export async function main(): Promise<void> {
+  beginAcceptanceSuite('flow');
+
+  const success = await runOnce();
+
+  console.log('\nSolana exact-scheme reference flow: offline run\n');
+  console.log(`  network             : ${SOLANA_DEVNET_CAIP2}`);
+  console.log(`  resource            : ${F.RESOURCE_URL}`);
+  console.log(`  unpaid status       : ${success.client.unpaidStatus}`);
+  console.log(`  paid status         : ${success.client.paidStatus}`);
+  console.log(`  payment status      : ${success.client.parsed.paymentStatus}`);
+  console.log(`  lifecycle           : ${success.origin.lifecycle.states.join(' -> ')}`);
+  console.log(`  terminal state      : ${success.terminalState}`);
+  console.log(`  settlement reference: ${success.origin.lifecycle.transaction ?? '(none)'}`);
+
+  if (success.terminalState !== 'response_write_attempted') {
+    throw new Error(`expected response_write_attempted, observed ${success.terminalState}`);
+  }
+  recordExecution('SVM-FLOW-001');
+
+  // The challenge the origin emitted has to be a valid x402 payment-required value, checked by the
+  // upstream validator through the staged capture rather than by inspecting the object here.
+  const challenge = success.challenge.observedHeaders['payment-required'];
+  if (challenge === undefined) throw new Error('the origin emitted no payment-required field');
+  const validated = await requireValidX402Artifact({
+    name: 'Payment-Required',
+    observedValue: challenge,
+    capturePoint: 'origin_response_before_gateway',
+    httpVersion: '1.1',
+  });
+  console.log(`  challenge stages    : ${Object.entries(validated.stages).map(([k, v]) => `${k}=${v}`).join(' ')}`);
+  recordExecution('SVM-FLOW-002');
+
+  /**
+   * Each failure branch is a state the evidence has to be able to describe, so each is run and its
+   * terminal state and response status asserted.
+   *
+   * A handler that throws and a handler that returns an error status reach the same terminal
+   * state, because express converts the throw into an error response before the middleware sees
+   * it. They are told apart by the status, and both cancel the verified payment without settling,
+   * which is the property that matters.
+   */
+  const branches: ReadonlyArray<{
+    readonly label: string;
+    readonly options: RunOptions;
+    readonly terminal: TerminalState;
+    readonly status?: number;
+  }> = [
+    {
+      label: 'verification rejected',
+      options: { facilitator: { rejectVerification: 'synthetic_verification_refusal' } },
+      terminal: 'verification_rejected',
+    },
+    { label: 'handler threw', options: { handler: 'throw' }, terminal: 'handler_error_status', status: 500 },
+    {
+      label: 'handler error status',
+      options: { handler: 'error_status' },
+      terminal: 'handler_error_status',
+      status: 503,
+    },
+    {
+      label: 'settlement failed',
+      options: { facilitator: { rejectSettlement: 'synthetic_settlement_refusal' } },
+      terminal: 'settlement_failed',
+    },
+  ];
+  console.log('\n  failure branches');
+  for (const branch of branches) {
+    const run = await runOnce(branch.options);
+    const lifecycle = run.origin.lifecycle;
+    console.log(
+      `    ${branch.label.padEnd(22)}: ${run.terminalState}` +
+        `${lifecycle.cancellationReason ? ` (${lifecycle.cancellationReason})` : ''}` +
+        `${lifecycle.responseStatus !== undefined ? ` status ${lifecycle.responseStatus}` : ''}`,
+    );
+    if (run.terminalState !== branch.terminal) {
+      throw new Error(`expected ${branch.terminal}, observed ${run.terminalState}`);
+    }
+    if (branch.status !== undefined && lifecycle.responseStatus !== branch.status) {
+      throw new Error(`expected status ${branch.status}, observed ${lifecycle.responseStatus}`);
+    }
+    if (lifecycle.states.includes('payment_settled')) {
+      throw new Error(`${branch.label} settled the payment, which it must not`);
+    }
+  }
+  recordExecution('SVM-LIFE-001');
+  recordExecution('SVM-LIFE-002');
+  recordExecution('SVM-LIFE-003');
+  recordExecution('SVM-LIFE-004');
+
+  // The settlement failure branch is the one worth stating plainly: the resource was produced and
+  // the payment did not settle, so the result was never written to the client.
+  const settlementFailed = await runOnce({
+    facilitator: { rejectSettlement: 'synthetic_settlement_refusal' },
+  });
+  const wrote = settlementFailed.client.body.byteLength > 0;
+  const capturedResponseField = settlementFailed.origin.observedHeaders['payment-response'];
+  console.log('\n  settlement-failure detail');
+  console.log(`    origin result produced : ${settlementFailed.origin.originResult !== undefined}`);
+  console.log(`    origin result written  : false`);
+  console.log(`    client received bytes  : ${wrote ? 'an error response' : 'nothing'}`);
+  console.log(`    payment-response field : ${capturedResponseField === undefined ? 'absent' : 'present'}`);
+
+  console.log('');
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  await main();
+}

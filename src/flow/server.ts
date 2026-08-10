@@ -1,0 +1,264 @@
+/**
+ * The paid resource: one express endpoint behind the x402 payment middleware.
+ *
+ * OBSERVATION. The lifecycle is observed through the upstream hooks. `onProtectedRequest` sees the
+ * request before payment processing and carries the payment field value the middleware itself
+ * read; `onAfterVerify`, `onBeforeSettle`, `onAfterSettle`, `onSettleFailure`, `onVerifyFailure`
+ * and `onVerifiedPaymentCanceled` report each lifecycle transition with its result. Nothing here
+ * wraps, replaces or re-implements the middleware in order to watch it.
+ *
+ * Two facts are not exposed by any hook, and only those two are taken from the application
+ * boundary instead. The field values the middleware emits on the response, `PAYMENT-REQUIRED` and
+ * `PAYMENT-RESPONSE`, are read once the response has finished, through the ordinary express
+ * response API, because the hooks report decoded objects while evidence binds the value that was
+ * actually observed. And that a write was attempted at all is a property of the response rather
+ * than of the payment, so it comes from the response `finish` event.
+ *
+ * The hooks are registered on a shared server instance but report per-request facts, so the
+ * recorder for the request in flight is carried in asynchronous context rather than in a variable
+ * that a second concurrent request would overwrite.
+ *
+ * STREAMING IS OUT OF SCOPE. The middleware buffers the handler's output so settlement can run
+ * before the client sees anything, which is exactly what makes the "resource produced, payment not
+ * settled" state observable. A streaming handler defeats that, so this reference flow serves one
+ * buffered response and says so rather than appearing to support both.
+ */
+import { AsyncLocalStorage } from 'node:async_hooks';
+import express, { type Express, type Request, type Response } from 'express';
+import { paymentMiddlewareFromHTTPServer } from '@x402/express';
+import {
+  x402HTTPResourceServer,
+  x402ResourceServer,
+  type FacilitatorClient,
+  type RouteConfig,
+} from '@x402/core/server';
+import type { Network } from '@x402/core/types';
+import { LifecycleRecorder, type LifecycleObservation } from './lifecycle.ts';
+
+/** The bytes an origin handler produced, before any transfer encoding. */
+export interface OriginResult {
+  readonly status: number;
+  readonly contentType: string;
+  readonly body: Uint8Array;
+}
+
+/** What one request produced, from the origin's point of view. */
+export interface RequestObservation {
+  readonly method: string;
+  readonly path: string;
+  readonly query: string;
+  readonly lifecycle: LifecycleObservation;
+  /** Field values exactly as observed at the application boundary. */
+  readonly observedHeaders: {
+    readonly 'payment-required'?: string;
+    readonly 'payment-signature'?: string;
+    readonly 'payment-response'?: string;
+  };
+  /** The bytes the handler produced, present only when the handler ran. */
+  readonly originResult?: OriginResult;
+}
+
+export interface PaidResourceOptions {
+  /** Injected rather than constructed, so an offline run can supply an in-process facilitator. */
+  readonly facilitatorClient: FacilitatorClient;
+  /** Registers the scheme servers on the resource server, before initialization. */
+  readonly registerSchemes: (server: x402ResourceServer) => void;
+  readonly network: Network;
+  readonly payTo: string;
+  /** Exact-scheme price, in the asset's smallest unit, with the asset named. */
+  readonly price: { readonly asset: string; readonly amount: string };
+  readonly method: 'GET';
+  readonly path: string;
+  readonly resourceUrl: string;
+  readonly maxTimeoutSeconds: number;
+  /** Extensions the resource declares, built with the upstream declaration APIs. */
+  readonly declaredExtensions?: Record<string, unknown>;
+  /** Produces the paid result. Throwing exercises the handler-threw branch. */
+  readonly handler: (request: { readonly path: string; readonly query: string }) => OriginResult;
+}
+
+export interface PaidResource {
+  readonly app: Express;
+  /** One entry per request that reached the protected route, in arrival order. */
+  readonly observations: readonly RequestObservation[];
+}
+
+interface RequestState {
+  readonly recorder: LifecycleRecorder;
+  originResult?: OriginResult;
+}
+
+/** Reads a response header as a single string, which is how the x402 field values are set. */
+function headerValue(res: Response, name: string): string | undefined {
+  const value = res.getHeader(name);
+  if (value === undefined || value === null) return undefined;
+  return Array.isArray(value) ? value.join(', ') : String(value);
+}
+
+/**
+ * Build the paid resource.
+ *
+ * The resource server is initialized here rather than lazily by the middleware, so the run order
+ * is the same every time and an initialization failure surfaces at construction instead of inside
+ * the first request.
+ */
+export async function createPaidResource(options: PaidResourceOptions): Promise<PaidResource> {
+  const observations: RequestObservation[] = [];
+  const perRequest = new AsyncLocalStorage<RequestState>();
+  const state = (): RequestState | undefined => perRequest.getStore();
+
+  const routeConfig: RouteConfig = {
+    accepts: {
+      scheme: 'exact',
+      payTo: options.payTo,
+      price: { asset: options.price.asset, amount: options.price.amount },
+      network: options.network,
+      maxTimeoutSeconds: options.maxTimeoutSeconds,
+    },
+    resource: options.resourceUrl,
+    description: 'Reference paid resource for the payment-evidence example',
+    mimeType: 'application/json',
+    ...(options.declaredExtensions ? { extensions: options.declaredExtensions } : {}),
+  };
+
+  const resourceServer = new x402ResourceServer(options.facilitatorClient);
+  options.registerSchemes(resourceServer);
+
+  resourceServer
+    .onAfterVerify(async (context) => {
+      const recorder = state()?.recorder;
+      recorder?.enter('payment_payload_received');
+      if (context.result.isValid) {
+        recorder?.enter('payment_verified');
+        recorder?.note({ payer: context.result.payer });
+      } else {
+        recorder?.finish('verification_rejected', {
+          failureReason: context.result.invalidReason ?? 'verification_rejected',
+        });
+      }
+    })
+    .onVerifyFailure(async (context) => {
+      state()?.recorder.finish('verification_rejected', { failureReason: context.error.message });
+    })
+    .onBeforeSettle(async () => {
+      // Reaching settlement means the handler already ran and its output is buffered.
+      state()?.recorder.enter('resource_executed');
+    })
+    .onAfterSettle(async (context) => {
+      const recorder = state()?.recorder;
+      if (context.result.success) {
+        recorder?.enter('payment_settled');
+        recorder?.note({ transaction: context.result.transaction, payer: context.result.payer });
+      } else {
+        recorder?.finish('settlement_failed', {
+          failureReason: context.result.errorReason ?? 'settlement_failed',
+        });
+      }
+    })
+    .onSettleFailure(async (context) => {
+      state()?.recorder.finish('settlement_failed', { failureReason: context.error.message });
+    })
+    .onVerifiedPaymentCanceled(async (context) => {
+      const recorder = state()?.recorder;
+      recorder?.enter('resource_executed');
+      recorder?.finish(
+        context.reason === 'handler_threw' ? 'handler_threw' : 'handler_error_status',
+        {
+          cancellationReason: context.reason,
+          ...(context.responseStatus !== undefined
+            ? { responseStatus: context.responseStatus }
+            : {}),
+        },
+      );
+    });
+
+  const routePattern = `${options.method} ${options.path}`;
+  const httpServer = new x402HTTPResourceServer(resourceServer, {
+    [routePattern]: routeConfig,
+  }).onProtectedRequest(async (context) => {
+    const recorder = state()?.recorder;
+    recorder?.enter('request_received');
+    if (context.paymentHeader === undefined) recorder?.enter('payment_required');
+    else recorder?.enter('payment_payload_received');
+  });
+
+  await httpServer.initialize();
+
+  const app = express();
+
+  // Runs before the payment middleware, so the request's recorder exists for every hook the
+  // middleware fires and the finish listener is registered before anything is written.
+  app.use((req: Request, res: Response, next) => {
+    const requestState: RequestState = { recorder: new LifecycleRecorder() };
+    perRequest.run(requestState, () => {
+      const recorder = requestState.recorder;
+      const queryIndex = req.originalUrl.indexOf('?');
+      const query = queryIndex === -1 ? '?' : req.originalUrl.slice(queryIndex);
+      const observedSignature = req.get('payment-signature');
+
+      res.on('finish', () => {
+        const reached = recorder.observation();
+        if (reached.states.includes('payment_settled')) {
+          // Settlement succeeded and the response was written. The origin can say a write was
+          // attempted; it cannot see whether the client received it.
+          recorder.enter('response_prepared');
+          recorder.enter('response_write_attempted');
+          recorder.finish('response_write_attempted', { responseStatus: res.statusCode });
+        } else {
+          recorder.note({ responseStatus: res.statusCode });
+        }
+
+        observations.push({
+          method: req.method,
+          path: req.path,
+          query,
+          lifecycle: recorder.observation(),
+          observedHeaders: {
+            ...(headerValue(res, 'payment-required') !== undefined
+              ? { 'payment-required': headerValue(res, 'payment-required')! }
+              : {}),
+            ...(observedSignature !== undefined ? { 'payment-signature': observedSignature } : {}),
+            ...(headerValue(res, 'payment-response') !== undefined
+              ? { 'payment-response': headerValue(res, 'payment-response')! }
+              : {}),
+          },
+          ...(requestState.originResult ? { originResult: requestState.originResult } : {}),
+        });
+      });
+
+      next();
+    });
+  });
+
+  // `syncFacilitatorOnStart` is off because initialization already ran above; leaving it on would
+  // make the first request's behaviour depend on whether initialization had completed.
+  app.use(paymentMiddlewareFromHTTPServer(httpServer, undefined, undefined, false));
+
+  app.get(options.path, (req: Request, res: Response) => {
+    const queryIndex = req.originalUrl.indexOf('?');
+    const result = options.handler({
+      path: req.path,
+      query: queryIndex === -1 ? '?' : req.originalUrl.slice(queryIndex),
+    });
+    const requestState = state();
+    if (requestState) requestState.originResult = result;
+    res.status(result.status).set('content-type', result.contentType).end(Buffer.from(result.body));
+  });
+
+  /**
+   * The application's own error boundary.
+   *
+   * MEASURED, and it shapes what the lifecycle can distinguish: express catches a throw from a
+   * route handler and turns it into an error response before the payment middleware ever sees it.
+   * The middleware therefore reports a handler that threw and a handler that returned an error
+   * status through the same cancellation reason, `handler_failed`, and the two are told apart by
+   * the status alone. Both cancel the verified payment without settling, which is the property the
+   * evidence depends on. Registering this handler keeps the failure quiet and the status
+   * predictable instead of relying on the framework's default page.
+   */
+  app.use((_error: unknown, _req: Request, res: Response, _next: express.NextFunction) => {
+    res.status(500).set('content-type', 'application/json').end('{"error":"handler failed"}');
+  });
+
+  return { app, observations };
+}

@@ -1,0 +1,107 @@
+/**
+ * Record-issuing keys for the two run modes.
+ *
+ * The offline path uses a fixed key so a repeated run produces identical bytes. That key is
+ * written here in the source, in the open, because it is test material: it protects nothing, it is
+ * published in a public repository, and treating it as a secret would be theatre. It is refused
+ * outside the fixture mode so it cannot be reached by accident on a live run.
+ *
+ * The devnet path generates a key into a gitignored directory with owner-only permissions and
+ * keeps it across runs, so the same issuer can be recognised between runs. It is a demonstration
+ * key on a test network, not an organizational identity.
+ *
+ * WHAT VERIFICATION MEANS HERE. A record that verifies against one of these keys shows that its
+ * contents are intact relative to the key material supplied to the verifier. It does not show that
+ * the key belongs to any particular organization, and nothing in this example establishes that.
+ */
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { derivePublicKey, generateKeypair } from '@peac/crypto';
+
+const APP_ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
+const KEY_DIR = join(APP_ROOT, '.local', 'keys');
+const ISSUER_KEY_PATH = join(KEY_DIR, 'issuer.json');
+
+export type RunMode = 'fixture' | 'devnet';
+
+export interface IssuerKey {
+  readonly privateKey: Uint8Array;
+  readonly publicKey: Uint8Array;
+  /** Key identifier carried in the record header. */
+  readonly kid: string;
+  /** Issuer identity claimed by the record. */
+  readonly iss: string;
+}
+
+/**
+ * TEST-ONLY issuer key for the offline path. Not a secret, not reused anywhere, and never valid
+ * for anything beyond this example's fixture output.
+ */
+const FIXTURE_ISSUER_PRIVATE_KEY = Uint8Array.from(
+  Array.from({ length: 32 }, (_, i) => (i * 7 + 11) % 256),
+);
+
+export const FIXTURE_ISSUER = 'https://origin.example.test';
+export const FIXTURE_KID = 'payment-evidence-fixture-key-1';
+
+/** The issuer identity used by a devnet run. Overridable so a real deployment names itself. */
+export const DEVNET_ISSUER_ENV = 'PEAC_EXAMPLE_ISSUER';
+const DEFAULT_DEVNET_ISSUER = 'https://origin.example.test';
+
+interface StoredIssuerKey {
+  readonly note: string;
+  readonly kid: string;
+  readonly privateKeyHex: string;
+}
+
+function loadStoredKey(): StoredIssuerKey | undefined {
+  try {
+    const parsed = JSON.parse(readFileSync(ISSUER_KEY_PATH, 'utf8')) as Partial<StoredIssuerKey>;
+    if (typeof parsed.kid === 'string' && typeof parsed.privateKeyHex === 'string') {
+      return { note: String(parsed.note ?? ''), kid: parsed.kid, privateKeyHex: parsed.privateKeyHex };
+    }
+  } catch {
+    // Absent or unreadable is the ordinary first-run case; a new key is generated below.
+  }
+  return undefined;
+}
+
+/**
+ * Resolve the issuer key for a run.
+ *
+ * @param mode - `fixture` returns the fixed test key; `devnet` reuses or creates the local key.
+ */
+export async function resolveIssuerKey(mode: RunMode): Promise<IssuerKey> {
+  if (mode === 'fixture') {
+    return {
+      privateKey: FIXTURE_ISSUER_PRIVATE_KEY,
+      publicKey: await derivePublicKey(FIXTURE_ISSUER_PRIVATE_KEY),
+      kid: FIXTURE_KID,
+      iss: FIXTURE_ISSUER,
+    };
+  }
+
+  const iss = process.env[DEVNET_ISSUER_ENV] ?? DEFAULT_DEVNET_ISSUER;
+  const stored = loadStoredKey();
+  if (stored !== undefined) {
+    const privateKey = Uint8Array.from(Buffer.from(stored.privateKeyHex, 'hex'));
+    if (privateKey.byteLength !== 32) {
+      throw new Error(`stored issuer key is ${privateKey.byteLength} bytes, expected 32`);
+    }
+    return { privateKey, publicKey: await derivePublicKey(privateKey), kid: stored.kid, iss };
+  }
+
+  const generated = await generateKeypair();
+  const kid = `payment-evidence-devnet-${Date.now().toString(36)}`;
+  mkdirSync(KEY_DIR, { recursive: true, mode: 0o700 });
+  const payload: StoredIssuerKey = {
+    note: 'Demonstration key for a test network. Not an organizational identity.',
+    kid,
+    privateKeyHex: Buffer.from(generated.privateKey).toString('hex'),
+  };
+  writeFileSync(ISSUER_KEY_PATH, `${JSON.stringify(payload, null, 2)}\n`, { mode: 0o600 });
+  // Written separately as well, because an existing file keeps its previous permissions.
+  chmodSync(ISSUER_KEY_PATH, 0o600);
+  return { privateKey: generated.privateKey, publicKey: generated.publicKey, kid, iss };
+}

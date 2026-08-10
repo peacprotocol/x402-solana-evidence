@@ -45,6 +45,9 @@ jobs:
       - name: Rejection corpus
         run: pnpm test:negative
 
+      - name: Offline end-to-end flow
+        run: pnpm test:flow
+
       - name: Acceptance matrix completeness
         run: pnpm test:acceptance
 
@@ -59,13 +62,13 @@ jobs:
       - name: Fixture path with egress diagnostics
         run: pnpm demo:offline
 
-      # FOUND-DET-001: the fixture walkthrough must be byte-identical run to run, or the
+      # FOUND-DET-001: the binding walkthrough must be byte-identical run to run, or the
       # committed vectors describe something that cannot be reproduced.
-      - name: Fixture determinism
+      - name: Binding walkthrough determinism
         run: |
-          pnpm demo:fixture > /tmp/fixture-run-1.txt
-          pnpm demo:fixture > /tmp/fixture-run-2.txt
-          diff /tmp/fixture-run-1.txt /tmp/fixture-run-2.txt
+          pnpm demo:binding > /tmp/binding-run-1.txt
+          pnpm demo:binding > /tmp/binding-run-2.txt
+          diff /tmp/binding-run-1.txt /tmp/binding-run-2.txt
 
   offline:
     name: offline path (no network)
@@ -91,12 +94,22 @@ jobs:
       # fixture path runs in a container with no network interface at all, so a claim that the
       # offline path needs no network is proven by the environment rather than by instrumentation.
       # Plain node runs the sources directly, so the gate depends on no build step of its own.
-      - name: Fixture path with networking disabled
+      - name: Binding walkthrough with networking disabled
         run: |
           docker run --rm --network=none \
             -v "$PWD:/work" -w /work \
             node:24 \
             node src/fixture-demo.ts
+
+      # The end-to-end flow serves and consumes the paid resource over the loopback interface,
+      # which exists inside a container with no network interface. Passing here is what shows that
+      # the injected facilitator and the wallet stand-in reach nothing outside the process.
+      - name: Offline end-to-end flow with networking disabled
+        run: |
+          docker run --rm --network=none \
+            -v "$PWD:/work" -w /work \
+            node:24 \
+            node src/flow/fixture-e2e.ts
 
   secret-scan:
     name: secret scan
