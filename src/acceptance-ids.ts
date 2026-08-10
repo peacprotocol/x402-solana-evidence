@@ -139,6 +139,16 @@ export const ACCEPTANCE_CASES = {
   'HOSTILE-EV-004': { description: 'a sidecar of the wrong JSON type is reported as a failure, not thrown', scope: 'local' },
   'HOSTILE-EV-005': { description: 'an artifact that exists but cannot be read fails, and is never read as absent', scope: 'local' },
 
+  /**
+   * The material a reviewer needs, produced before anything is spent.
+   *
+   * A live run that settles a payment and then cannot write the public half of its signing key has
+   * produced a complete transcript nobody else can check. So the output paths are reserved and the
+   * key file is written and read back before a payment can be sent.
+   */
+  'EVID-KEY-001': { description: 'a taken output path stops the run before anything is built or sent', scope: 'local' },
+  'EVID-KEY-002': { description: 'a completed emission leaves both the evidence and its verification key', scope: 'local' },
+
   'EVID-TX-001': { description: 'an interrupted emission leaves no final evidence directory', scope: 'local' },
   'EVID-TX-002': { description: 'an existing evidence directory is never overwritten or written into', scope: 'local' },
 

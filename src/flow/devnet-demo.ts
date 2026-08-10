@@ -21,6 +21,11 @@
  * directory is never touched. The run then verifies what it wrote, from those files and a public
  * key alone, and fails if that verification does not pass.
  *
+ * ORDER. The run identifier is allocated, both output paths are checked for collisions, and the
+ * public half of the signing key is written and read back BEFORE any payment is sent. Evidence
+ * nobody else can verify is not evidence, so the material a reviewer needs is produced while
+ * stopping is still free rather than after devnet funds have moved.
+ *
  * This file and the preflight are the only parts of the reference flow that use the network.
  */
 import { writeFileSync } from 'node:fs';
@@ -47,6 +52,7 @@ import { loadPayerSigner } from './payer-key.ts';
 import { displayKeyPath } from './key-file.ts';
 import { buildEvidence, RESOURCE_PATH, RESOURCE_QUERY } from './fixture-e2e.ts';
 import {
+  prepareRunOutputs,
   runEvidenceDir,
   runEvidenceDisplay,
   runPublicKeyDisplay,
@@ -54,7 +60,7 @@ import {
   writeEvidenceTransactionally,
 } from './issue-record.ts';
 import { resolveIssuerKey } from './issuer-key.ts';
-import { SUPPLIED_KEY_CAVEAT, writeIssuerPublicKeyFile } from './public-key-file.ts';
+import { SUPPLIED_KEY_CAVEAT } from './public-key-file.ts';
 import { formatReport, verifyEvidence } from './verify-evidence.ts';
 import type { ObservationSource } from './observe-settlement.ts';
 import {
@@ -94,9 +100,15 @@ export function facilitatorReference(configured: string | undefined): string {
   return publicEndpointReference(configured) ?? 'the configured x402 facilitator';
 }
 
-/** Directory name for one run: the instant it was observed, in a filesystem-safe form. */
-function runIdFor(observedAtUnixSeconds: number): string {
-  return `devnet-${new Date(observedAtUnixSeconds * 1000).toISOString().replace(/[:.]/g, '-')}`;
+/**
+ * Directory name for one run: the instant it started, in a filesystem-safe form.
+ *
+ * Derived from the start rather than from the observation, because the identifier has to exist
+ * before the run reaches a payment: both output paths are claimed and the reviewer's key is
+ * written while stopping is still free.
+ */
+function runIdFor(startedAtUnixSeconds: number): string {
+  return `devnet-${new Date(startedAtUnixSeconds * 1000).toISOString().replace(/[:.]/g, '-')}`;
 }
 
 /**
@@ -196,6 +208,25 @@ export async function main(): Promise<void> {
   if (payTo === undefined) throw new Error('the preflight passed without a recipient');
   const payer = await loadPayerSigner();
   if (payer === undefined) throw new Error('the preflight passed without a payer key');
+
+  /**
+   * Everything a reviewer will need, claimed and written before a payment can be sent.
+   *
+   * The run identifier comes from the start of the run rather than from the settlement, so both
+   * output paths can be checked for collisions and the public half of the signing key can be
+   * written and read back while stopping still costs nothing. After this point a failure can leave
+   * a key file without a directory, which is public material describing an incomplete run; it can
+   * never leave a directory whose key was never written.
+   */
+  const runId = runIdFor(Math.floor(Date.now() / 1000));
+  const display = runEvidenceDisplay(runId);
+  const issuerKey = await resolveIssuerKey('devnet');
+  const reviewerKey = prepareRunOutputs({
+    evidenceDirectory: runEvidenceDir(runId),
+    publicKeyFile: runPublicKeyPath(runId),
+    issuerKey,
+  });
+  console.log(`\n  verification key    : ${runPublicKeyDisplay(runId)}`);
 
   const resource = await createPaidResource({
     facilitatorClient,
@@ -332,10 +363,6 @@ export async function main(): Promise<void> {
       },
     );
 
-    const runId = runIdFor(observedAtUnixSeconds);
-    const display = runEvidenceDisplay(runId);
-    const issuerKey = await resolveIssuerKey('devnet');
-
     /**
      * Written so that the directory is either complete or absent.
      *
@@ -348,9 +375,13 @@ export async function main(): Promise<void> {
       finalDirectory: runEvidenceDir(runId),
       layout,
       finalize: async (staged) => {
-        // Verified the way an outside reader would: from the files just written and a public key,
-        // with no access to the state the run still holds in memory.
-        const report = await verifyEvidence(staged, issuerKey.publicKey);
+        // Verified the way an outside reader would: from the files just written and the key file
+        // written before the payment, with no access to the state the run still holds in memory.
+        const report = await verifyEvidence(staged, reviewerKey.publicKey, {
+          algorithm: reviewerKey.algorithm,
+          kid: reviewerKey.kid,
+          issuer: reviewerKey.issuer,
+        });
         writeFileSync(join(staged, 'verification-report.txt'), formatReport(display, report).trimStart());
         writeFileSync(join(staged, 'how-to-verify.txt'), reviewerNotes(runId));
         console.log(formatReport(display, report));
@@ -358,11 +389,6 @@ export async function main(): Promise<void> {
       },
     });
     console.log(`  evidence            : ${display}`);
-
-    // The public half of the signing key, beside the run it belongs to, so the directory can be
-    // handed to someone with no access to this machine. Written only once the directory is
-    // complete, and never the private half.
-    writeIssuerPublicKeyFile(runPublicKeyPath(runId), issuerKey);
     console.log(outsiderInstructions(runId));
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));

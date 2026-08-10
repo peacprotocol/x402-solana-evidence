@@ -177,10 +177,17 @@ does not pretend to; it binds a fixed synthetic resource identity so its bytes r
 so in `determinism-note.txt`. The resource URL advertised in the x402 payment requirements is a
 separate, x402-owned field and stays the configured value in both modes.
 
-Evidence is written to `out/<runId>/`, where `runId` is the instant the run was observed. That
+Evidence is written to `out/<runId>/`, where `runId` is the instant the run started. That
 directory is gitignored: it describes one run rather than a fixture. It does not write into
 `fixtures/expected-evidence/`, which belongs to the reproducible fixture run and is checked byte for
 byte, so a live run must never overwrite it.
+
+The run identifier is allocated, both output paths are checked for collisions, and the public half
+of the signing key is written and read back **before** a payment is sent. Evidence nobody else can
+verify is not evidence, so the material a reviewer needs is produced while stopping still costs
+nothing. A finalized evidence directory therefore implies the key file beside it exists; the
+reverse does not hold, and a key file left without a directory is public material describing a run
+that did not complete.
 
 The directory is written so that it is either complete or absent. Everything goes to a uniquely
 named `out/.tmp-<token>/` first: the artifacts, the verification, the report and a `how-to-verify`
@@ -370,6 +377,15 @@ back.
 
 **There is an `out/.tmp-...` directory.** An emission did not complete, so nothing was moved into
 place. It holds whatever that run got as far as writing. Inspect it, then remove it.
+
+**There is an `out/devnet-<timestamp>-issuer.pub.json` with no matching directory.** The run
+reserved its outputs and wrote its verification key, then stopped before a complete evidence set
+existed. The file holds public key material only. Remove it, or keep it with whatever staging
+directory that run left.
+
+**`pnpm demo:devnet` says a verification key file already exists at that path.** Two runs started
+within the same second, or an earlier run left one behind. Nothing was written and nothing was
+sent. Move or rename the existing file if you want the name back.
 
 ## What a successful verification means
 

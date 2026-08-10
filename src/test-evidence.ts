@@ -35,6 +35,7 @@ import {
   EvidenceCollisionError,
   EXPECTED_EVIDENCE_DIR,
   EXPECTED_EVIDENCE_DISPLAY,
+  prepareRunOutputs,
   writeEvidence,
   writeEvidenceTransactionally,
 } from './flow/issue-record.ts';
@@ -939,6 +940,133 @@ recordExecution('EVID-TX-002');
     'the existing directory is byte for byte what it was',
     readFileSync(sentinel, 'utf8') === 'an earlier run wrote this',
   );
+
+  rmSync(parent, { recursive: true, force: true });
+}
+
+/**
+ * EVID-KEY-001. An output path that is already taken.
+ *
+ * Both paths are checked before anything is written, and the fault is injected into each in turn.
+ * Reaching a payment with a path already occupied is the failure worth preventing: the run would
+ * spend funds and then have nowhere to put what a reviewer needs.
+ */
+recordExecution('EVID-KEY-001');
+{
+  const parent = mkdtempSync(join(tmpdir(), 'peac-run-outputs-'));
+  const evidenceDirectory = join(parent, 'devnet-run');
+  const publicKeyFile = join(parent, 'devnet-run-issuer.pub.json');
+
+  // The key path is taken, by something that must survive untouched.
+  writeFileSync(publicKeyFile, 'an earlier run wrote this');
+  let thrown: unknown;
+  try {
+    prepareRunOutputs({ evidenceDirectory, publicKeyFile, issuerKey: fixtureKey });
+  } catch (e) {
+    thrown = e;
+  }
+  check('a taken verification key path is refused', thrown instanceof EvidenceCollisionError, String(thrown));
+  check('the message names the key file rather than the evidence', String(thrown).includes('verification key file'), String(thrown));
+  check('the existing file is byte for byte what it was', readFileSync(publicKeyFile, 'utf8') === 'an earlier run wrote this');
+  check('and no evidence directory was created', !existsSync(evidenceDirectory));
+
+  // The evidence path is taken, and the key file must not be written for a run that cannot finish.
+  const second = mkdtempSync(join(tmpdir(), 'peac-run-outputs-'));
+  const takenDirectory = join(second, 'devnet-run');
+  const freeKeyFile = join(second, 'devnet-run-issuer.pub.json');
+  mkdirSync(takenDirectory);
+  let secondThrown: unknown;
+  try {
+    prepareRunOutputs({ evidenceDirectory: takenDirectory, publicKeyFile: freeKeyFile, issuerKey: fixtureKey });
+  } catch (e) {
+    secondThrown = e;
+  }
+  check('a taken evidence path is refused', secondThrown instanceof EvidenceCollisionError, String(secondThrown));
+  check('and no key file is written for a run that cannot finish', !existsSync(freeKeyFile));
+
+  rmSync(parent, { recursive: true, force: true });
+  rmSync(second, { recursive: true, force: true });
+}
+
+/**
+ * EVID-KEY-002. The devnet-shaped ordering, offline.
+ *
+ * The same two steps a live run performs, in the same order and through the same functions, with a
+ * payment that never happens. What is asserted is the invariant the ordering exists for: a
+ * finalized evidence directory implies the key file beside it, and an emission that fails leaves
+ * no directory at all.
+ */
+recordExecution('EVID-KEY-002');
+{
+  const parent = mkdtempSync(join(tmpdir(), 'peac-run-outputs-'));
+
+  // The complete path.
+  {
+    const evidenceDirectory = join(parent, 'devnet-complete');
+    const publicKeyFile = join(parent, 'devnet-complete-issuer.pub.json');
+    const reviewerKey = prepareRunOutputs({ evidenceDirectory, publicKeyFile, issuerKey: fixtureKey });
+
+    check('the verification key exists before any evidence does', existsSync(publicKeyFile) && !existsSync(evidenceDirectory));
+    check(
+      'and it round-trips to the key the run will sign with',
+      Buffer.from(reviewerKey.publicKey).equals(Buffer.from(fixtureKey.publicKey)) &&
+        reviewerKey.kid === fixtureKey.kid &&
+        reviewerKey.issuer === fixtureKey.iss,
+    );
+
+    await writeEvidenceTransactionally({
+      finalDirectory: evidenceDirectory,
+      layout: emissionLayout,
+      finalize: async (stagedDirectory) => {
+        const report = await verifyEvidence(stagedDirectory, reviewerKey.publicKey, {
+          algorithm: reviewerKey.algorithm,
+          kid: reviewerKey.kid,
+          issuer: reviewerKey.issuer,
+        });
+        if (!report.ok) throw new Error('the staged evidence did not verify');
+      },
+    });
+
+    check('a completed run leaves both artifacts', existsSync(evidenceDirectory) && existsSync(publicKeyFile));
+    const report = await verifyEvidence(
+      evidenceDirectory,
+      readIssuerPublicKeyFile(publicKeyFile).publicKey,
+      { algorithm: reviewerKey.algorithm, kid: reviewerKey.kid, issuer: reviewerKey.issuer },
+    );
+    check(
+      'and the directory verifies under the key file written before the payment',
+      report.ok,
+      failedChecks(report).join(', ') || 'nothing failed',
+    );
+  }
+
+  // The interrupted path: the key exists, the directory does not, and the implication still holds.
+  {
+    const evidenceDirectory = join(parent, 'devnet-interrupted');
+    const publicKeyFile = join(parent, 'devnet-interrupted-issuer.pub.json');
+    prepareRunOutputs({ evidenceDirectory, publicKeyFile, issuerKey: fixtureKey });
+
+    let thrown: Error | undefined;
+    try {
+      await writeEvidenceTransactionally({
+        finalDirectory: evidenceDirectory,
+        layout: emissionLayout,
+        finalize: async () => {
+          throw new Error('synthetic failure during finalization');
+        },
+      });
+    } catch (e) {
+      thrown = e as Error;
+    }
+
+    check('an interrupted emission reports the failure', thrown?.message.includes('synthetic failure') === true);
+    check('it leaves no evidence directory', !existsSync(evidenceDirectory));
+    check(
+      'so an evidence directory never exists without its verification key',
+      !existsSync(evidenceDirectory) || existsSync(publicKeyFile),
+    );
+    check('and what it does leave is public key material only', existsSync(publicKeyFile));
+  }
 
   rmSync(parent, { recursive: true, force: true });
 }

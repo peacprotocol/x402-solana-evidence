@@ -29,6 +29,11 @@ import type {
 import { bindingDigest } from '../binding.ts';
 import type { IssuerKey } from './issuer-key.ts';
 import type { LifecycleObservation } from './lifecycle.ts';
+import {
+  readIssuerPublicKeyFile,
+  writeIssuerPublicKeyFile,
+  type LoadedIssuerPublicKey,
+} from './public-key-file.ts';
 import { chainObservationDigest, type SolanaChainObservationV1 } from './observe-settlement.ts';
 import type { EvidenceArtifact } from './presence.ts';
 
@@ -232,15 +237,63 @@ export function writeEvidence(directory: string, layout: EvidenceLayout): void {
   }
 }
 
-/** A run whose destination already exists. The existing directory is never touched. */
+/** A run whose output path is already taken. What is already there is never touched. */
 export class EvidenceCollisionError extends Error {
-  constructor(readonly directory: string) {
+  /**
+   * @param path - The path that is already occupied.
+   * @param what - What that path was going to hold, so the message names the actual conflict.
+   */
+  constructor(
+    readonly path: string,
+    what = 'Evidence',
+  ) {
     super(
-      `Evidence already exists at ${directory}\n` +
-        '  It was not modified, and nothing was written. A run\'s evidence belongs to that run.',
+      `${what} already exists at ${path}\n` +
+        "  It was not modified, and nothing was written. A run's outputs belong to that run.",
     );
     this.name = 'EvidenceCollisionError';
   }
+}
+
+/**
+ * Reserve a run's output paths and write the material a reviewer needs, before anything is spent.
+ *
+ * WHY THIS RUNS FIRST. The evidence a live run produces is verifiable only alongside the public
+ * half of the key it was signed with. Writing that key after the evidence leaves a window in which
+ * devnet funds have already moved and the material a reviewer needs cannot be produced: a full
+ * transcript of a real payment, unusable by anyone else. So both output paths are claimed and the
+ * key file is written and read back before the run is allowed to reach a payment at all.
+ *
+ * The ordering gives the property worth stating: a finalized evidence directory implies the key
+ * file beside it already exists, because the directory cannot be moved into place until long after
+ * the key was written. The reverse does not hold, and does not need to: a key file left without a
+ * directory is public material describing a run that did not complete.
+ *
+ * @param input.evidenceDirectory - Where complete evidence will belong. Must not exist.
+ * @param input.publicKeyFile - Where the public half of the signing key goes. Must not exist.
+ * @param input.issuerKey - The key this run will sign with. Only its public half is written.
+ * @returns The key file as read back from disk, so what a reviewer will load is what was checked.
+ * @throws EvidenceCollisionError when either path is taken, before anything is written.
+ * @throws InvalidPublicKeyFileError when the file just written does not read back as a key.
+ */
+export function prepareRunOutputs(input: {
+  readonly evidenceDirectory: string;
+  readonly publicKeyFile: string;
+  readonly issuerKey: { readonly publicKey: Uint8Array; readonly kid: string; readonly iss: string };
+}): LoadedIssuerPublicKey {
+  const { evidenceDirectory, publicKeyFile, issuerKey } = input;
+  if (existsSync(evidenceDirectory)) throw new EvidenceCollisionError(evidenceDirectory);
+  if (existsSync(publicKeyFile)) {
+    throw new EvidenceCollisionError(publicKeyFile, 'A verification key file');
+  }
+
+  mkdirSync(dirname(publicKeyFile), { recursive: true });
+  // Written exclusively, so a file that appeared between the check above and this line is a
+  // collision rather than something to overwrite.
+  writeIssuerPublicKeyFile(publicKeyFile, issuerKey);
+  // Read back through the same reader a reviewer uses: a file that cannot be loaded is discovered
+  // here, where nothing has been spent, rather than by the person the evidence was handed to.
+  return readIssuerPublicKeyFile(publicKeyFile);
 }
 
 /** Distinguishes concurrent runs that share a starting instant. */
