@@ -8,6 +8,16 @@
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type {
+  FacilitatorClient,
+  HTTPAdapter,
+  HTTPProcessResult,
+  SettleContext,
+  SettleFailureContext,
+  SettleResultContext,
+  VerifiedPaymentCanceledContext,
+  VerifyResultContext,
+} from '@x402/core/server';
 import { X402_PINNED_VERSION, SETTLE_RESPONSE_LOCAL_AUTHORITY } from './x402-header.ts';
 
 const APP_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -53,11 +63,32 @@ const REQUIRED_EXPORTS: Record<string, readonly string[]> = {
     'validatePaymentRequired',
     'validatePaymentPayload',
   ],
-  '@x402/svm': ['SOLANA_DEVNET_CAIP2', 'USDC_DEVNET_ADDRESS', 'SettlementCache', 'assertFeePayerIsolated'],
+  '@x402/svm': [
+    'SOLANA_DEVNET_CAIP2',
+    'USDC_DEVNET_ADDRESS',
+    'SettlementCache',
+    'assertFeePayerIsolated',
+    // Used only by the live devnet path, to build a signer from a devnet keypair.
+    'toClientSvmSigner',
+  ],
   '@x402/svm/exact/server': ['ExactSvmScheme', 'registerExactSvmScheme'],
   '@x402/svm/exact/client': ['ExactSvmScheme', 'registerExactSvmScheme'],
   '@x402/svm/exact/facilitator': ['ExactSvmScheme', 'registerExactSvmScheme'],
-  '@x402/express': ['paymentMiddleware', 'x402ResourceServer'],
+  // The resource-server surface the reference flow builds on: the server itself, its HTTP
+  // wrapper, and the facilitator client the flow injects rather than dialling out to.
+  '@x402/core/server': ['x402ResourceServer', 'x402HTTPResourceServer', 'HTTPFacilitatorClient'],
+  // The in-process facilitator used by the offline path is the upstream facilitator, driven by a
+  // locally registered scheme facilitator; it is not a reimplementation of one.
+  '@x402/core/facilitator': ['x402Facilitator'],
+  '@x402/core/client': ['x402Client', 'x402HTTPClient'],
+  '@x402/express': [
+    'paymentMiddleware',
+    'paymentMiddlewareFromConfig',
+    'paymentMiddlewareFromHTTPServer',
+    'x402ResourceServer',
+    'x402HTTPResourceServer',
+    'ExpressAdapter',
+  ],
   '@x402/extensions/offer-receipt': ['OFFER_RECEIPT', 'createOfferReceiptExtension', 'canonicalize'],
   '@x402/extensions/payment-identifier': [
     'PAYMENT_IDENTIFIER',
@@ -74,6 +105,20 @@ const REQUIRED_SUBPATHS = Object.keys(REQUIRED_EXPORTS);
 const PINNED = ['@x402/core', '@x402/express', '@x402/svm', '@x402/extensions'] as const;
 const EXPECTED_VERSION = X402_PINNED_VERSION;
 
+/**
+ * Non-x402 packages the reference flow depends on, pinned individually.
+ *
+ * `express` is a peer dependency of `@x402/express`: the middleware intercepts the response
+ * methods of this exact framework, so its major version is part of the surface under test rather
+ * than an implementation detail. `@solana/kit` is a peer dependency of `@x402/svm` and is used
+ * only on the live devnet path; it is pinned to the version the x402 package resolves so both
+ * resolve to a single instance and signer types stay identical.
+ */
+const PINNED_PEERS: Record<string, string> = {
+  express: '5.2.1',
+  '@solana/kit': '5.5.1',
+};
+
 let failures = 0;
 const check = (name: string, ok: boolean, detail = '') => {
   if (!ok) failures++;
@@ -84,6 +129,12 @@ const check = (name: string, ok: boolean, detail = '') => {
 for (const p of PINNED) {
   const v = installedVersion(p);
   check(`${p} installed at ${EXPECTED_VERSION}`, v === EXPECTED_VERSION, `got ${v}`);
+}
+
+// 1b. peer packages that are part of the surface, pinned individually
+for (const [pkg, expected] of Object.entries(PINNED_PEERS)) {
+  const v = installedVersion(pkg);
+  check(`${pkg} installed at ${expected}`, v === expected, `got ${v}`);
 }
 
 // 2. every required subpath must resolve, load, AND expose the exact symbols relied upon
@@ -99,6 +150,77 @@ for (const sub of REQUIRED_SUBPATHS) {
   check(`${sub} exports ${REQUIRED_EXPORTS[sub]!.join(', ')}`, missing.length === 0,
     missing.length ? `missing: ${missing.join(', ')}` : '');
 }
+
+/**
+ * 2b. Lifecycle observation depends on registration points, not just on the classes existing.
+ *
+ * The reference flow observes the payment lifecycle through the upstream hooks rather than by
+ * wrapping or re-implementing the middleware. If a registration method disappears, the flow would
+ * silently observe less while every import still resolved, so the methods are asserted by name.
+ */
+const serverModule = (await import('@x402/core/server')) as unknown as {
+  x402ResourceServer: new (...args: never[]) => unknown;
+  x402HTTPResourceServer: new (...args: never[]) => unknown;
+};
+const RESOURCE_SERVER_HOOKS = [
+  'onBeforeVerify',
+  'onAfterVerify',
+  'onVerifyFailure',
+  'onBeforeSettle',
+  'onAfterSettle',
+  'onSettleFailure',
+  'onVerifiedPaymentCanceled',
+] as const;
+const HTTP_SERVER_METHODS = [
+  'onProtectedRequest',
+  'processHTTPRequest',
+  'processSettlement',
+  'requiresPayment',
+  'initialize',
+] as const;
+const missingHooks = RESOURCE_SERVER_HOOKS.filter(
+  (m) => typeof (serverModule.x402ResourceServer.prototype as Record<string, unknown>)[m] !== 'function',
+);
+check(`x402ResourceServer exposes ${RESOURCE_SERVER_HOOKS.join(', ')}`, missingHooks.length === 0,
+  missingHooks.length ? `missing: ${missingHooks.join(', ')}` : '');
+const missingHttp = HTTP_SERVER_METHODS.filter(
+  (m) => typeof (serverModule.x402HTTPResourceServer.prototype as Record<string, unknown>)[m] !== 'function',
+);
+check(`x402HTTPResourceServer exposes ${HTTP_SERVER_METHODS.join(', ')}`, missingHttp.length === 0,
+  missingHttp.length ? `missing: ${missingHttp.join(', ')}` : '');
+
+// 2c. express is loaded as an application factory, which is how the flow uses it.
+const expressModule = (await import('express')) as unknown as { default?: unknown };
+const expressFactory = expressModule.default ?? expressModule;
+check('express default export is callable', typeof expressFactory === 'function');
+
+/**
+ * 2d. Compile-time surface pins.
+ *
+ * The facilitator client interface and the lifecycle hook contexts are types: they have no runtime
+ * representation to assert. Naming their members in code that must typecheck pins them anyway, so
+ * an upstream reshape fails the typecheck gate rather than passing here and surfacing later as a
+ * silently absent observation.
+ */
+const TYPE_PINS = {
+  'FacilitatorClient.verify, .settle, .getSupported': (c: FacilitatorClient) =>
+    [c.verify, c.settle, c.getSupported],
+  'HTTPAdapter.getHeader, .getMethod, .getPath, .getUrl': (a: HTTPAdapter) =>
+    [a.getHeader, a.getMethod, a.getPath, a.getUrl],
+  'HTTPProcessResult.type': (r: HTTPProcessResult) => [r.type],
+  'VerifyResultContext.paymentPayload, .requirements, .result': (c: VerifyResultContext) =>
+    [c.paymentPayload, c.requirements, c.result],
+  'SettleContext.paymentPayload, .requirements': (c: SettleContext) =>
+    [c.paymentPayload, c.requirements],
+  'SettleResultContext.result': (c: SettleResultContext) => [c.result],
+  'SettleFailureContext.error': (c: SettleFailureContext) => [c.error],
+  'VerifiedPaymentCanceledContext.reason, .responseStatus': (c: VerifiedPaymentCanceledContext) =>
+    [c.reason, c.responseStatus],
+} as const;
+check(
+  'upstream type surface pinned at compile time',
+  Object.values(TYPE_PINS).every((accessor) => typeof accessor === 'function'),
+);
 
 // 3. the settle-response authority string must name the version actually installed, so a reported
 //    structural verdict is always attributable to a known upstream shape
@@ -149,6 +271,9 @@ for (const sub of REQUIRED_SUBPATHS) {
     console.log(`    ${sub}  <unresolvable>`);
   }
 }
+
+console.log('\n  type surface pinned at compile time:');
+for (const member of Object.keys(TYPE_PINS)) console.log(`    ${member}`);
 
 console.log(`\n${failures ? 'FAILED' : 'PASSED'}: ${failures} failure(s)\n`);
 if (failures) process.exit(1);
