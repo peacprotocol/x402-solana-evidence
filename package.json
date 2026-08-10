@@ -26,6 +26,7 @@
     "test:negative": "tsx src/test-negative.ts",
     "test:flow": "tsx src/flow/fixture-e2e.ts",
     "test:svm": "tsx src/test-svm-matrix.ts",
+    "test:evidence": "tsx src/test-evidence.ts",
     "test:acceptance": "tsx src/test-acceptance.ts",
     "gen:golden": "tsx src/gen-golden.ts",
     "typecheck": "tsc --noEmit",

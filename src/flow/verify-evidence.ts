@@ -34,6 +34,11 @@ import {
 } from './issue-record.ts';
 import { resolveIssuerKey } from './issuer-key.ts';
 import { TERMINAL_STATES, type TerminalState } from './lifecycle.ts';
+import {
+  InvalidPublicKeyFileError,
+  readIssuerPublicKeyFile,
+  SUPPLIED_KEY_CAVEAT,
+} from './public-key-file.ts';
 
 export interface VerificationCheck {
   readonly name: string;
@@ -274,16 +279,116 @@ export async function verifyEvidence(
   return { ok: checks.every((c) => c.ok), checks };
 }
 
+/** A command line this verifier cannot act on. Never raised for evidence that simply fails. */
+export class UsageError extends Error {}
+
+export const VERIFY_USAGE = [
+  'Usage:',
+  '  verify                                        verify the committed fixture evidence',
+  '  verify --evidence <dir> --public-key <file>   verify any evidence directory',
+].join('\n');
+
+export interface VerifyRequest {
+  /** Directory to read. */
+  readonly directory: string;
+  /** How that directory is named in output. Never an absolute machine-specific path. */
+  readonly display: string;
+  /** Public key file to verify under. Absent means the committed fixture and its test key. */
+  readonly publicKeyFile?: string;
+}
+
 /**
- * Entry point for `pnpm verify`: verify the committed offline evidence.
+ * Decide what to verify, from arguments alone.
  *
- * It takes the directory and the test-only public key and reads nothing else, which is the same
- * position a reader of this repository is in.
+ * The two options are required together on purpose. `--evidence` without a key would fall back to
+ * the fixture's test key, and a directory that failed for that reason would look like tampering
+ * rather than like the wrong key. `--public-key` without a directory would verify the committed
+ * fixture under someone else's key, which answers a question nobody asked.
+ *
+ * @param argv - Arguments after the script name.
+ * @throws UsageError for anything this verifier cannot act on.
  */
-export async function main(): Promise<void> {
-  const issuerKey = await resolveIssuerKey('fixture');
-  const report = await verifyEvidence(EXPECTED_EVIDENCE_DIR, issuerKey.publicKey);
-  console.log(formatReport(EXPECTED_EVIDENCE_DISPLAY, report));
+export function parseVerifyArguments(argv: readonly string[]): VerifyRequest {
+  let evidence: string | undefined;
+  let publicKeyFile: string | undefined;
+
+  // A leading `--` is the package manager's argument separator. Some versions consume it and some
+  // forward it verbatim, so it is accepted and dropped here rather than making the documented
+  // command depend on which one is installed.
+  const start = argv[0] === '--' ? 1 : 0;
+
+  for (let index = start; index < argv.length; index += 1) {
+    const argument = argv[index]!;
+    if (argument !== '--evidence' && argument !== '--public-key') {
+      throw new UsageError(`unrecognised argument: ${argument.slice(0, 40)}`);
+    }
+    const value = argv[index + 1];
+    if (value === undefined || value.startsWith('--')) {
+      throw new UsageError(`${argument} needs a value`);
+    }
+    if (argument === '--evidence') {
+      if (evidence !== undefined) throw new UsageError('--evidence was given more than once');
+      evidence = value;
+    } else {
+      if (publicKeyFile !== undefined) throw new UsageError('--public-key was given more than once');
+      publicKeyFile = value;
+    }
+    index += 1;
+  }
+
+  if (evidence === undefined && publicKeyFile === undefined) {
+    return { directory: EXPECTED_EVIDENCE_DIR, display: EXPECTED_EVIDENCE_DISPLAY };
+  }
+  if (evidence === undefined) {
+    throw new UsageError('--public-key needs --evidence: it cannot verify the committed fixture');
+  }
+  if (publicKeyFile === undefined) {
+    throw new UsageError('--evidence needs --public-key: the fixture key verifies only the fixture');
+  }
+  return { directory: evidence, display: evidence, publicKeyFile };
+}
+
+function requestFrom(argv: readonly string[]): VerifyRequest {
+  try {
+    return parseVerifyArguments(argv);
+  } catch (e) {
+    if (!(e instanceof UsageError)) throw e;
+    console.error(`\n${e.message}\n\n${VERIFY_USAGE}\n`);
+    process.exit(2);
+  }
+}
+
+function keyFrom(path: string): Uint8Array {
+  try {
+    return readIssuerPublicKeyFile(path).publicKey;
+  } catch (e) {
+    if (!(e instanceof InvalidPublicKeyFileError)) throw e;
+    console.error(`\n${e.message}\n`);
+    process.exit(2);
+  }
+}
+
+/**
+ * Entry point for `pnpm verify`.
+ *
+ * With no arguments it verifies the committed fixture under the test key, which is the position a
+ * reader of this repository is in. With `--evidence` and `--public-key` it verifies any directory
+ * under any supplied key, which is the position someone handed a live run's output is in. Both read
+ * files and a key and nothing else: no network, no origin, no state shared with whatever produced
+ * the directory.
+ */
+export async function main(argv: readonly string[] = process.argv.slice(2)): Promise<void> {
+  const request = requestFrom(argv);
+  const publicKey =
+    request.publicKeyFile === undefined
+      ? (await resolveIssuerKey('fixture')).publicKey
+      : keyFrom(request.publicKeyFile);
+
+  const report = await verifyEvidence(request.directory, publicKey);
+  console.log(formatReport(request.display, report));
+  // Stated on every run under a supplied key, including a successful one, because success is
+  // exactly where the claim is easiest to overstate.
+  if (request.publicKeyFile !== undefined) console.log(`  ${SUPPLIED_KEY_CAVEAT}\n`);
   if (!report.ok) process.exit(1);
 }
 

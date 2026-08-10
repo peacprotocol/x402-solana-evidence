@@ -46,8 +46,15 @@ import {
 import { loadPayerSigner } from './payer-key.ts';
 import { displayKeyPath } from './key-file.ts';
 import { buildEvidence, RESOURCE_PATH, RESOURCE_QUERY } from './fixture-e2e.ts';
-import { runEvidenceDir, runEvidenceDisplay, writeEvidence } from './issue-record.ts';
+import {
+  runEvidenceDir,
+  runEvidenceDisplay,
+  runPublicKeyDisplay,
+  runPublicKeyPath,
+  writeEvidence,
+} from './issue-record.ts';
 import { resolveIssuerKey } from './issuer-key.ts';
+import { SUPPLIED_KEY_CAVEAT, writeIssuerPublicKeyFile } from './public-key-file.ts';
 import { formatReport, verifyEvidence } from './verify-evidence.ts';
 import type { ObservationSource } from './observe-settlement.ts';
 
@@ -88,6 +95,26 @@ function facilitatorReference(configured: string | undefined): string {
 /** Directory name for one run: the instant it was observed, in a filesystem-safe form. */
 function runIdFor(observedAtUnixSeconds: number): string {
   return `devnet-${new Date(observedAtUnixSeconds * 1000).toISOString().replace(/[:.]/g, '-')}`;
+}
+
+/**
+ * The exact command someone else runs against what this run wrote.
+ *
+ * Printed in full rather than described, because a reader who has to reconstruct the invocation
+ * from prose is a reader who will not run it. The boundary is printed with it: the key travels with
+ * the evidence, which makes the record checkable and establishes nothing about who signed it.
+ */
+function outsiderInstructions(runId: string): string {
+  return [
+    '',
+    'Verify this evidence from the files and the key alone:',
+    '',
+    `  corepack pnpm@8.15.0 verify -- --evidence ${runEvidenceDisplay(runId)} ` +
+      `--public-key ${runPublicKeyDisplay(runId)}`,
+    '',
+    `  ${SUPPLIED_KEY_CAVEAT}`,
+    '',
+  ].join('\n');
 }
 
 export async function main(): Promise<void> {
@@ -267,6 +294,11 @@ export async function main(): Promise<void> {
     );
     console.log(formatReport(display, report));
     if (!report.ok) throw new Error('the evidence written by this run did not verify');
+
+    // The public half of the signing key, beside the run it belongs to, so the directory can be
+    // handed to someone with no access to this machine. The private key is never written.
+    writeIssuerPublicKeyFile(runPublicKeyPath(runId), issuerKey);
+    console.log(outsiderInstructions(runId));
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }

@@ -1,0 +1,149 @@
+/**
+ * The public half of an issuer key, as a file that can be handed to someone else.
+ *
+ * WHY IT EXISTS. Verification needs the evidence directory and a public key, and nothing else. A
+ * run whose evidence is meant to be checked by another person therefore has to hand that key over,
+ * so a live run writes it out beside the run it belongs to. Only the public half is ever written;
+ * the private key stays in `.local/keys/` and no code path here reads it.
+ *
+ * WHAT A SUPPLIED KEY ESTABLISHES, AND WHAT IT DOES NOT. It makes the record cryptographically
+ * verifiable: the signature either matches or it does not. It establishes nothing about who holds
+ * the matching private key. A reader who takes the key from the same place they took the evidence
+ * has checked that the evidence is internally consistent and was signed by whoever produced it,
+ * which is a smaller claim than it looks. An identity claim needs a key obtained through a channel
+ * independent of the evidence, and this example provides no such channel and claims no such thing.
+ *
+ * FAILING CLOSED. Every rejection names the file and the reason. A key file that cannot be read as
+ * a key is never guessed at: verifying under a key nobody can describe would report a result about
+ * material the reader did not choose.
+ */
+import { readFileSync, writeFileSync } from 'node:fs';
+import { displayKeyPath } from './key-file.ts';
+
+/** The only algorithm this example issues or verifies under. */
+export const PUBLIC_KEY_ALGORITHM = 'Ed25519';
+
+/** Exactly the 32 bytes of an Ed25519 public key, as hex. */
+const PUBLIC_KEY_HEX = /^[0-9a-fA-F]{64}$/;
+
+export interface IssuerPublicKeyFileV1 {
+  readonly algorithm: typeof PUBLIC_KEY_ALGORITHM;
+  readonly kid: string;
+  readonly issuer: string;
+  /** The 32-byte Ed25519 public key, lowercase hex. */
+  readonly publicKey: string;
+  readonly note: string;
+}
+
+export interface LoadedIssuerPublicKey {
+  readonly publicKey: Uint8Array;
+  readonly kid: string;
+  readonly issuer: string;
+}
+
+/**
+ * The sentence that has to travel with any verification performed under a supplied key.
+ *
+ * Kept as one exported string so the command output, the file itself and the documentation cannot
+ * drift into three different statements of the same boundary.
+ */
+export const SUPPLIED_KEY_CAVEAT = [
+  'A supplied public key makes the record cryptographically verifiable.',
+  'It is not an independently trusted identity: it says nothing about who holds the',
+  'private key, and a key obtained from the same place as the evidence establishes',
+  'internal consistency only.',
+].join('\n  ');
+
+export class InvalidPublicKeyFileError extends Error {
+  constructor(
+    readonly path: string,
+    readonly reason: string,
+  ) {
+    super(
+      `Public key file cannot be used: ${displayKeyPath(path)}\n` +
+        `  reason: ${reason}\n` +
+        '  expected: {"algorithm":"Ed25519","kid":...,"issuer":...,"publicKey":<64 hex chars>}',
+    );
+    this.name = 'InvalidPublicKeyFileError';
+  }
+}
+
+/**
+ * Write the public half of an issuer key.
+ *
+ * @param path - Where to write. An existing file is never replaced: a run's key belongs to that
+ *   run, and overwriting one would silently restate which key verifies an earlier directory.
+ * @param key - The key material. Only `publicKey`, `kid` and `iss` are read.
+ */
+export function writeIssuerPublicKeyFile(
+  path: string,
+  key: { readonly publicKey: Uint8Array; readonly kid: string; readonly iss: string },
+): void {
+  const contents: IssuerPublicKeyFileV1 = {
+    algorithm: PUBLIC_KEY_ALGORITHM,
+    kid: key.kid,
+    issuer: key.iss,
+    publicKey: Buffer.from(key.publicKey).toString('hex'),
+    note:
+      'Public key only. Verifying under it shows the record is intact; ' +
+      'it does not establish who holds the private key.',
+  };
+  writeFileSync(path, `${JSON.stringify(contents, null, 2)}\n`, { flag: 'wx' });
+}
+
+/**
+ * Read a public key file, or refuse it.
+ *
+ * @param path - The file to read.
+ * @throws InvalidPublicKeyFileError for anything that is not a usable Ed25519 public key.
+ */
+export function readIssuerPublicKeyFile(path: string): LoadedIssuerPublicKey {
+  let text: string;
+  try {
+    text = readFileSync(path, 'utf8');
+  } catch (e) {
+    const reason =
+      (e as NodeJS.ErrnoException).code === 'ENOENT'
+        ? 'there is no file at this path'
+        : `it could not be read (${(e as Error).message.split('\n')[0]})`;
+    throw new InvalidPublicKeyFileError(path, reason);
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (e) {
+    throw new InvalidPublicKeyFileError(
+      path,
+      `it is not valid JSON (${(e as Error).message.split('\n')[0]})`,
+    );
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new InvalidPublicKeyFileError(path, 'it does not hold a key object');
+  }
+
+  const file = parsed as Partial<IssuerPublicKeyFileV1>;
+  if (file.algorithm !== PUBLIC_KEY_ALGORITHM) {
+    throw new InvalidPublicKeyFileError(
+      path,
+      `algorithm must be ${PUBLIC_KEY_ALGORITHM}, this example verifies nothing else`,
+    );
+  }
+  if (typeof file.kid !== 'string' || file.kid.length === 0) {
+    throw new InvalidPublicKeyFileError(path, 'it has no key identifier');
+  }
+  if (typeof file.issuer !== 'string' || file.issuer.length === 0) {
+    throw new InvalidPublicKeyFileError(path, 'it names no issuer');
+  }
+  // Checked as hex before decoding, because the decoder discards characters it does not recognise:
+  // a damaged field would otherwise decode to a shorter, entirely different key.
+  if (typeof file.publicKey !== 'string' || !PUBLIC_KEY_HEX.test(file.publicKey)) {
+    throw new InvalidPublicKeyFileError(path, 'its public key is not 32 bytes of hex');
+  }
+
+  return {
+    publicKey: Uint8Array.from(Buffer.from(file.publicKey, 'hex')),
+    kid: file.kid,
+    issuer: file.issuer,
+  };
+}

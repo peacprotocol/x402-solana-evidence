@@ -93,6 +93,11 @@ export const ACCEPTANCE_CASES = {
   'SVM-TAMPER-003': { description: 'a tampered record payload fails local verification with an invalid signature', scope: 'local' },
   'SVM-TAMPER-004': { description: 'a valid native artifact with an invalid record binding fails at the binding stage', scope: 'local' },
   'SVM-TAMPER-005': { description: 'a valid record with a missing native artifact fails the presence contract', scope: 'local' },
+  // The evidence directory as a thing handed to someone else: verified under a supplied key.
+  'EVID-CLI-001': { description: 'an evidence directory and a supplied public key verify through the documented arguments', scope: 'local' },
+  'EVID-CLI-002': { description: 'a public key that did not sign the record fails at the signature stage', scope: 'local' },
+  'EVID-CLI-003': { description: 'a malformed public key file is refused with the file and the reason named', scope: 'local' },
+
   'SVM-DET-001': { description: 'the offline end-to-end run produces byte-identical evidence across runs', scope: 'ci-external' },
   'SVM-NET-001': { description: 'the offline end-to-end run passes in a job with networking disabled', scope: 'ci-external' },
 

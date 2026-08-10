@@ -41,6 +41,16 @@ export const EXPECTED_EVIDENCE_DISPLAY = 'fixtures/expected-evidence';
 export const runEvidenceDir = (runId: string): string => join(APP_ROOT, 'out', runId);
 /** Repository-relative name for a live run's directory, so no machine-specific path is printed. */
 export const runEvidenceDisplay = (runId: string): string => `out/${runId}`;
+/**
+ * Where a live run writes the public half of the key its record was signed with.
+ *
+ * Beside the evidence rather than inside it: the directory is the thing being verified, and a key
+ * that lives in the material it verifies invites reading the pair as self-authenticating. It is
+ * neither, and the run says so when it prints the command.
+ */
+export const runPublicKeyPath = (runId: string): string =>
+  join(APP_ROOT, 'out', `${runId}-issuer.pub.json`);
+export const runPublicKeyDisplay = (runId: string): string => `out/${runId}-issuer.pub.json`;
 
 /** Registered PEAC record type for commerce evidence. */
 export const RECORD_TYPE = 'org.peacprotocol/payment';

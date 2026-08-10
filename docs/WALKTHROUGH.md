@@ -34,6 +34,7 @@ pnpm test:keys        # key creation, persistence and fail-closed loading
 pnpm test:preflight   # preflight revalidation and recipient validation
 pnpm test:flow        # offline end-to-end run and the lifecycle failure branches
 pnpm test:svm         # security, replay, binding and tamper cases
+pnpm test:evidence    # verifying an evidence directory under a supplied public key
 pnpm typecheck        # TypeScript 7, primary
 pnpm typecheck:compat # TypeScript 6, compatibility gate
 pnpm test:acceptance  # every declared acceptance case executed
@@ -164,6 +165,7 @@ directory is gitignored: it describes one run rather than a fixture. It does not
 byte, so a live run must never overwrite it.
 
 ```text
+out/devnet-<timestamp>-issuer.pub.json   the public half of the signing key, beside the run
 out/devnet-<timestamp>/
   record.jws                        the PEAC record issued for this run
   request-binding.json              the operation that was requested
@@ -182,8 +184,20 @@ that state declares.
 
 The run then verifies what it wrote, from those files and the public key alone, and prints the
 report. It exits non-zero if that verification does not pass, so a run cannot leave behind evidence
-it never checked. `pnpm verify` remains a check of the committed fixture directory; a live run
-verifies its own output as it finishes.
+it never checked.
+
+It also writes the public half of its signing key beside the directory, never the private half, and
+prints the exact command someone else runs against both:
+
+```bash
+corepack pnpm@8.15.0 verify -- --evidence out/devnet-<timestamp> \
+  --public-key out/devnet-<timestamp>-issuer.pub.json
+```
+
+A supplied public key makes the record cryptographically verifiable. It is not an independently
+trusted identity: it says nothing about who holds the matching private key, and a key that travelled
+with the evidence establishes internal consistency only. `pnpm verify` with no arguments remains a
+check of the committed fixture directory under its test key.
 
 ### Endpoints a devnet run may contact
 

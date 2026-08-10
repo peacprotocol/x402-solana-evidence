@@ -137,6 +137,27 @@ Two result digests exist and are never conflated:
 - A client-observed digest, if any, is reported by that client and is **not** signed here. The
   origin cannot observe what survived compression, transfer encoding or a CDN.
 
+## Verifying evidence you were handed
+
+`pnpm verify` with no arguments checks the committed fixture under its test key. Any other evidence
+directory needs the key it was signed under, supplied explicitly:
+
+```bash
+pnpm verify -- --evidence out/devnet-<runId> --public-key out/devnet-<runId>-issuer.pub.json
+```
+
+Both options are required together. `--evidence` alone would fall back to the fixture's test key,
+and a directory that failed for that reason would read as tampering rather than as the wrong key.
+
+The key file is JSON: `{"algorithm":"Ed25519","kid":...,"issuer":...,"publicKey":<64 hex chars>}`.
+A live run writes one beside the directory it belongs to and prints the exact command above. Only
+the public half is ever written.
+
+**A supplied public key makes the record cryptographically verifiable. It is not an independently
+trusted identity.** It says nothing about who holds the matching private key, and a key obtained
+from the same place as the evidence establishes internal consistency only. An identity claim needs a
+key obtained through a channel independent of the evidence, and this example provides none.
+
 ## What verification establishes
 
 Successful verification establishes that a signed record has not been altered since it was signed,
@@ -222,6 +243,9 @@ pnpm test           # every suite, both typechecks and the acceptance matrix
 pnpm demo:fixture   # the offline end-to-end run; writes and verifies the committed evidence
 pnpm verify         # verify that evidence from the files and a public key alone
 pnpm tamper-demo    # edit one bound field in a copy and watch verification name the failure
+
+# any evidence directory, under any supplied key
+pnpm verify -- --evidence <dir> --public-key <file>
 ```
 
 Then read the [walkthrough](docs/WALKTHROUGH.md) for the lifecycle, the artifact presence contract
@@ -241,6 +265,7 @@ pnpm test:keys                   # key creation, persistence and fail-closed loa
 pnpm test:preflight              # preflight revalidation and recipient validation
 pnpm test:flow                   # offline end-to-end run and the lifecycle failure branches
 pnpm test:svm                    # security, replay, binding and tamper cases
+pnpm test:evidence               # verifying an evidence directory under a supplied public key
 pnpm typecheck                   # TypeScript 7, primary
 pnpm typecheck:compat            # TypeScript 6, compatibility gate
 pnpm test:acceptance             # every declared acceptance case executed

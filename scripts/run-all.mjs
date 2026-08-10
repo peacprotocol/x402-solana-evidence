@@ -42,6 +42,7 @@ const STEPS = [
   { name: 'preflight revalidation', step: suite('src/test-preflight.ts') },
   { name: 'offline end-to-end flow', step: suite('src/flow/fixture-e2e.ts') },
   { name: 'security, replay, binding and tamper matrix', step: suite('src/test-svm-matrix.ts') },
+  { name: 'evidence emission and verification', step: suite('src/test-evidence.ts') },
   { name: 'typecheck (primary)', step: { command: process.execPath, args: [TSC, '--noEmit'] } },
   // The compatibility gate stays one script rather than being restated here, so the version it
   // pins and the diagnostics it treats as fatal have a single definition. It spawns node itself.
