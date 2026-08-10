@@ -1,7 +1,7 @@
 # PEAC Payment Evidence Example
 
-**Experimental deterministic binding profile, conformance fixtures and an x402 Solana exact-scheme
-payment-evidence reference flow.**
+**Experimental deterministic binding profile, interoperability fixtures and an x402 Solana
+exact-scheme payment-evidence reference flow.**
 
 Non-normative: it does not extend or modify the PEAC wire format, record registry, extension
 registry or conformance requirements.
@@ -18,6 +18,26 @@ documented manual step, not part of continuous integration.
 
 Start with the [walkthrough](docs/WALKTHROUGH.md) for the full command path, the lifecycle state
 machine and the devnet procedure.
+
+## What this demonstrates
+
+```text
+x402 challenge -> SVM exact payment -> origin result -> native settlement artifact
+-> PEAC signed evidence -> independent offline verification
+```
+
+- x402 v2, scheme `exact`, on SVM, denominated in Solana Devnet USDC.
+- The HTTP operation that was paid for, as RFC 9421 request components the origin observed rather
+  than components rebuilt by re-parsing a URL.
+- The exact bytes the origin produced, covered by digest, so the payment is bound to the work.
+- Native x402 artifacts preserved verbatim and left authoritative for their own claims; this
+  example digests and references them rather than reinterpreting them.
+- A PEAC-signed record over those bindings, verifiable from the files and a public key alone: no
+  network, no origin, no shared state with whatever produced the directory.
+- The facilitator's settlement report and a separate Solana RPC observation of the same
+  transaction, each attributed to whoever supplied it and never merged into a single account.
+- A missing or altered artifact fails at a named stage, so a failure says which claim is no longer
+  supported instead of condemning the directory as a whole.
 
 ## How this relates to x402
 
@@ -187,6 +207,13 @@ separate observation naming that endpoint, the slot and the commitment level it 
 are not a consensus claim: the record says who was asked and what they said, and anyone can check
 the transaction reference against the network themselves.
 
+The two can disagree. If the facilitator reported settlement success and the node reported that
+transaction with an execution error, verification prints the disagreement as a warning and the
+evidence still verifies. Warnings are reported separately from the checks and never change the
+verdict: integrity is a question about bytes and a key, and deciding which observer was right would
+mean promoting one account to a fact about the network. An observation that could not be made is
+recorded as unavailable and is never written up as a second observer confirming the first.
+
 ## Request components
 
 Components follow RFC 9421 derived-component semantics and are taken from the message as the origin
@@ -219,23 +246,26 @@ proxy trust before treating a forwarded scheme or authority as trusted.
 - Size bounds are application-local choices made by this example. They are not derived from, and
   imply nothing about, any HTTP parser limit.
 
-## Support matrix
+## Scope and state
 
-| Capability | State |
+This is a reference example, not a product with a support contract. The table says what it
+demonstrates and how far each part has actually been exercised.
+
+| Item | State |
 |---|---|
-| x402 v2 | supported |
-| scheme `exact` | supported |
-| SVM (Solana) artifacts and identifiers | supported |
+| reference scope | x402 v2 |
+| demonstrated scheme | `exact` |
+| SVM (Solana) artifacts and identifiers | covered by this reference |
 | field-value capture and staged validation | implemented |
 | request binding and origin-result binding | implemented |
-| conformance vectors and rejection corpus | implemented |
-| end-to-end payment flow | implemented, offline and deterministic |
+| deterministic validation vectors and rejection corpus | implemented |
+| offline x402 lifecycle reference | implemented, deterministic, no onchain payment |
+| live Solana Devnet USDC payment | acceptance pending; the manual procedure is in the [walkthrough](docs/WALKTHROUGH.md) |
+| separate Solana RPC observation | implemented for the live run; optional, and recorded as unavailable when the endpoint cannot answer |
 | PEAC signed record issuance | implemented |
 | offline verification from files and a public key | implemented |
 | tamper detection | implemented |
 | settlement observation and chain-observation documents | implemented |
-| independent node observation of the settlement transaction | implemented, live path only; optional and recorded as unavailable when the endpoint cannot answer |
-| live Solana devnet run | manual acceptance step; emits and verifies evidence under `out/`, see the [walkthrough](docs/WALKTHROUGH.md) |
 | scheme `upto` | out of scope |
 | batch settlement | out of scope |
 | streaming responses | out of scope |
@@ -271,7 +301,7 @@ corepack enable
 pnpm install --frozen-lockfile   # exact versions from the lockfile
 pnpm test                        # the full gate: every line below, in order, stopping at the first failure
 pnpm test:imports                # upstream export paths and exact version pins
-pnpm test:golden                 # conformance vectors and staged-validation reporting
+pnpm test:golden                 # deterministic validation vectors and staged-validation reporting
 pnpm test:negative               # rejection corpus
 pnpm test:keys                   # key creation, persistence and fail-closed loading
 pnpm test:preflight              # preflight revalidation and recipient validation
@@ -291,9 +321,9 @@ pnpm demo:devnet                 # live devnet run, spends devnet funds, writes 
 pnpm gen:golden                  # regenerate the vectors, then review the diff
 ```
 
-Conformance vectors live in `fixtures/golden-v1.json` with hard-coded expected bytes and digests,
-and are cross-checked against a second, independently written RFC 8785 implementation. Both binding
-documents validate against closed JSON Schema 2020-12 files in `schemas/`.
+Deterministic validation vectors live in `fixtures/golden-v1.json` with hard-coded expected bytes
+and digests, and are cross-checked against a second, independently written RFC 8785 implementation.
+Both binding documents validate against closed JSON Schema 2020-12 files in `schemas/`.
 
 Acceptance cases carry stable identifiers declared in `src/acceptance-ids.ts`. The suites record
 each one as it executes and `pnpm test:acceptance` fails if a declared case did not run, so

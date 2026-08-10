@@ -188,7 +188,7 @@ function determinismNote(): string {
     `  record identifier (jti)   supplied to issuance: ${FIXTURE_JTI}`,
     `  occurred-at and observed-at fixed at Unix ${F.FIXED_NOW_UNIX_SECONDS}`,
     '  payer, recipient, fee payer, blockhash and transaction reference are the fixed',
-    '    synthetic values from the conformance fixtures',
+    '    synthetic values from the interoperability fixtures',
     `  payment identifier        ${F.PAYMENT_ID}`,
     '  issuer key                the clearly labelled test-only key in src/flow/issuer-key.ts',
     '',

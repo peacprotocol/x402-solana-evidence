@@ -1,5 +1,5 @@
 {
-  "_comment": "Conformance vectors with hard-coded expected bytes and digests. Regenerate via pnpm gen:golden and review the diff.",
+  "_comment": "Deterministic validation vectors with hard-coded expected bytes and digests. Regenerate via pnpm gen:golden and review the diff.",
   "profileRequestBinding": "org.peacprotocol.examples.payment-evidence/request-binding/1",
   "profileOriginResultBinding": "org.peacprotocol.examples.payment-evidence/origin-result-binding/1",
   "requestBinding": {

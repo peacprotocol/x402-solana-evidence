@@ -6,7 +6,7 @@ Inputs that would otherwise vary are pinned, not suppressed:
   record identifier (jti)   supplied to issuance: 01984000-0000-7000-8000-0000a1b20201
   occurred-at and observed-at fixed at Unix 1785000000
   payer, recipient, fee payer, blockhash and transaction reference are the fixed
-    synthetic values from the conformance fixtures
+    synthetic values from the interoperability fixtures
   payment identifier        pay_0000000000000000000000000000f1x2
   issuer key                the clearly labelled test-only key in src/flow/issuer-key.ts
 

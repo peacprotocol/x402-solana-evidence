@@ -36,7 +36,7 @@ const suite = (entry) => ({ command: process.execPath, args: [TSX, join(ROOT, en
 
 const STEPS = [
   { name: 'dependency import smoke', step: suite('src/imports-smoke.ts') },
-  { name: 'conformance vectors', step: suite('src/test-golden.ts') },
+  { name: 'deterministic validation vectors', step: suite('src/test-golden.ts') },
   { name: 'rejection corpus', step: suite('src/test-negative.ts') },
   { name: 'key persistence', step: suite('src/test-keys.ts') },
   { name: 'preflight revalidation', step: suite('src/test-preflight.ts') },

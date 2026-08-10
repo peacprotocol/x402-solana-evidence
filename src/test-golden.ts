@@ -1,5 +1,5 @@
 /**
- * Conformance vectors, schema validation and staged-validation reporting.
+ * Deterministic validation vectors, schema validation and staged-validation reporting.
  *
  * Compares freshly built bindings against the committed fixtures/golden-v1.json, cross-checks the
  * protocol canonicalization helper against a separately written RFC 8785 implementation, and
@@ -69,7 +69,7 @@ const originResultBinding = buildOriginResultBinding({
 const reqDigest = await bindingDigest(requestBinding);
 const resDigest = await bindingDigest(originResultBinding);
 
-console.log('\nConformance vectors\n');
+console.log('\nDeterministic validation vectors\n');
 
 check('request binding digest matches committed vector', reqDigest === golden.requestBindingDigest,
   `got ${reqDigest}\n          expected ${golden.requestBindingDigest}`);

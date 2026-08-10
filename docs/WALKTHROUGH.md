@@ -19,7 +19,7 @@ pnpm install --frozen-lockfile
 
 `--frozen-lockfile` is deliberate: this example pins exact versions of the upstream x402 packages
 and the protocol packages, and an install that silently resolves something else invalidates the
-conformance vectors.
+deterministic validation vectors.
 
 ## Path 1: the reproducible fixture run
 
@@ -28,7 +28,7 @@ in this process, and the wallet is a stand-in that returns fixed placeholder byt
 
 ```bash
 pnpm test:imports     # upstream export paths and exact version pins
-pnpm test:golden      # conformance vectors and staged-validation reporting
+pnpm test:golden      # deterministic validation vectors and staged-validation reporting
 pnpm test:negative    # rejection corpus
 pnpm test:keys        # key creation, persistence and fail-closed loading
 pnpm test:preflight   # preflight revalidation and recipient validation
@@ -351,8 +351,8 @@ manager command, so nothing in the run resolves `pnpm` from `PATH`. Run
 the second command either.
 
 **`pnpm install --frozen-lockfile` fails.** The lockfile and `package.json` disagree. Do not drop
-the flag to make it pass: that resolves different upstream versions than the ones the conformance
-vectors were produced against.
+the flag to make it pass: that resolves different upstream versions than the ones the
+validation vectors were produced against.
 
 **`pnpm demo:fixture` leaves a `git diff` in `fixtures/expected-evidence/`.** The run is no longer
 reproducing the committed evidence. Read the diff before regenerating anything: a change in the

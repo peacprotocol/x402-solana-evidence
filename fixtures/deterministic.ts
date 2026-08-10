@@ -2,7 +2,7 @@
  * Deterministic fixture data.
  *
  * Every artifact here is built against the upstream x402 v2 types and accepted by the upstream
- * runtime validators, so the conformance vectors describe real x402 objects rather than shapes
+ * runtime validators, so the validation vectors describe real x402 objects rather than shapes
  * invented locally. Nothing is cast: if an upstream type changes, these fixtures stop compiling,
  * which is the point.
  *

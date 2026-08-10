@@ -1,7 +1,7 @@
 /**
  * Readable walkthrough of the binding layer using deterministic synthetic data.
  *
- * Assertions live in the conformance and rejection suites; this file exists to show what the
+ * Assertions live in the validation and rejection suites; this file exists to show what the
  * structures look like.
  */
 import { buildRequestBinding, buildOriginResultBinding, bindingDigest } from './binding.ts';

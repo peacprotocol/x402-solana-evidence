@@ -2,7 +2,7 @@
  * Regenerate fixtures/golden-v1.json.
  *
  * Run only when the binding structures intentionally change, and review the diff. Vectors that
- * regenerate silently are not conformance vectors; the tests compare against the committed file.
+ * regenerate silently are not validation vectors; the tests compare against the committed file.
  */
 import { writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -49,7 +49,7 @@ const originResultBinding = buildOriginResultBinding({
 
 const golden = {
   _comment:
-    'Conformance vectors with hard-coded expected bytes and digests. Regenerate via pnpm gen:golden and review the diff.',
+    'Deterministic validation vectors with hard-coded expected bytes and digests. Regenerate via pnpm gen:golden and review the diff.',
   profileRequestBinding: requestBinding.profile,
   profileOriginResultBinding: originResultBinding.profile,
   requestBinding,

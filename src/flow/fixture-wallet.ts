@@ -4,7 +4,7 @@
  * On the live devnet path the client registers the upstream SVM exact scheme, which builds and
  * signs a real Solana transaction with a real keypair. Offline there is no keypair and no chain to
  * build against, so this stands in for the wallet: it returns the fixed synthetic transaction the
- * conformance fixtures already use, through the upstream `SchemeNetworkClient` interface, so the
+ * interoperability fixtures already use, through the upstream `SchemeNetworkClient` interface, so the
  * payload still travels the real client, encoder, middleware and resource-server path.
  *
  * The substitution is confined to one interface with one method. Everything the reference flow
