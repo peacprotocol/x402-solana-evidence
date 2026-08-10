@@ -36,8 +36,10 @@ import { resolveIssuerKey } from './issuer-key.ts';
 import { TERMINAL_STATES, type TerminalState } from './lifecycle.ts';
 import {
   InvalidPublicKeyFileError,
+  PUBLIC_KEY_ALGORITHM,
   readIssuerPublicKeyFile,
   SUPPLIED_KEY_CAVEAT,
+  type LoadedIssuerPublicKey,
 } from './public-key-file.ts';
 
 export interface VerificationCheck {
@@ -113,14 +115,30 @@ function isTerminalState(value: unknown): value is TerminalState {
 }
 
 /**
+ * What a supplied key file said about itself, beyond the bytes verification actually uses.
+ *
+ * Only the bytes decide whether a signature is valid. The rest of the file is a description of
+ * those bytes, and a description that disagrees with the record is worth reporting: it means the
+ * file and the evidence were not produced for each other, whatever the signature says.
+ */
+export interface SuppliedKeyMetadata {
+  readonly algorithm: string;
+  readonly kid: string;
+  readonly issuer: string;
+}
+
+/**
  * Verify an evidence directory.
  *
  * @param directory - Directory holding the record and the documents it binds.
  * @param publicKey - Ed25519 public key the record is expected to verify under.
+ * @param suppliedKey - What a supplied key file declared, when the key came from one. Reported as
+ *   its own checks; it is never treated as an identity claim.
  */
 export async function verifyEvidence(
   directory: string,
   publicKey: Uint8Array,
+  suppliedKey?: SuppliedKeyMetadata,
 ): Promise<EvidenceVerificationReport> {
   const checks: VerificationCheck[] = [];
 
@@ -197,9 +215,49 @@ export async function verifyEvidence(
   checks.push(pass('record signature and schema', `verified under kid ${verified.kid}`));
 
   const claims = verified.claims as unknown as {
+    iss?: unknown;
     type?: string;
     extensions?: Record<string, Record<string, unknown>>;
   };
+
+  /**
+   * What the key file said, against what the record says.
+   *
+   * Reported as three separate checks rather than one, because they answer different questions: an
+   * algorithm this example does not verify under, a key identifier naming a different key, and an
+   * issuer naming a different party are three distinct disagreements and a reader should be told
+   * which one occurred. None of them is an identity check: a matching description of a key is
+   * still a description, and the caveat printed alongside says so.
+   */
+  if (suppliedKey !== undefined) {
+    checks.push(
+      suppliedKey.algorithm === PUBLIC_KEY_ALGORITHM
+        ? pass('supplied key algorithm', PUBLIC_KEY_ALGORITHM)
+        : fail(
+            'supplied key algorithm',
+            `the key file declares ${describeBound(suppliedKey.algorithm)}, ` +
+              `and this example verifies only ${PUBLIC_KEY_ALGORITHM}`,
+          ),
+    );
+    checks.push(
+      suppliedKey.kid === verified.kid
+        ? pass('supplied key identifier matches the record', verified.kid)
+        : fail(
+            'supplied key identifier matches the record',
+            `the key file names ${describeBound(suppliedKey.kid)}, ` +
+              `the record names ${describeBound(verified.kid)}`,
+          ),
+    );
+    checks.push(
+      suppliedKey.issuer === claims.iss
+        ? pass('supplied key issuer matches the record', suppliedKey.issuer)
+        : fail(
+            'supplied key issuer matches the record',
+            `the key file names ${describeBound(suppliedKey.issuer)}, ` +
+              `the record names ${describeBound(claims.iss)}`,
+          ),
+    );
+  }
   checks.push(
     claims.type === RECORD_TYPE
       ? pass('record type', RECORD_TYPE)
@@ -483,9 +541,9 @@ function requestFrom(argv: readonly string[]): VerifyRequest {
   }
 }
 
-function keyFrom(path: string): Uint8Array {
+function keyFrom(path: string): LoadedIssuerPublicKey {
   try {
-    return readIssuerPublicKeyFile(path).publicKey;
+    return readIssuerPublicKeyFile(path);
   } catch (e) {
     if (!(e instanceof InvalidPublicKeyFileError)) throw e;
     console.error(`\n${e.message}\n`);
@@ -504,12 +562,16 @@ function keyFrom(path: string): Uint8Array {
  */
 export async function main(argv: readonly string[] = process.argv.slice(2)): Promise<void> {
   const request = requestFrom(argv);
-  const publicKey =
-    request.publicKeyFile === undefined
-      ? (await resolveIssuerKey('fixture')).publicKey
-      : keyFrom(request.publicKeyFile);
+  const supplied = request.publicKeyFile === undefined ? undefined : keyFrom(request.publicKeyFile);
+  const publicKey = supplied?.publicKey ?? (await resolveIssuerKey('fixture')).publicKey;
 
-  const report = await verifyEvidence(request.directory, publicKey);
+  const report = await verifyEvidence(
+    request.directory,
+    publicKey,
+    supplied === undefined
+      ? undefined
+      : { algorithm: supplied.algorithm, kid: supplied.kid, issuer: supplied.issuer },
+  );
   console.log(formatReport(request.display, report));
   // Stated on every run under a supplied key, including a successful one, because success is
   // exactly where the claim is easiest to overstate.

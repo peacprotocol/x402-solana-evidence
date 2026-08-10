@@ -37,6 +37,8 @@ export interface IssuerPublicKeyFileV1 {
 
 export interface LoadedIssuerPublicKey {
   readonly publicKey: Uint8Array;
+  /** The algorithm the file declared. Carried so a report states it rather than assuming it. */
+  readonly algorithm: string;
   readonly kid: string;
   readonly issuer: string;
 }
@@ -52,6 +54,9 @@ export const SUPPLIED_KEY_CAVEAT = [
   'It is not an independently trusted identity: it says nothing about who holds the',
   'private key, and a key obtained from the same place as the evidence establishes',
   'internal consistency only.',
+  'The key file also declares an algorithm, a key identifier and an issuer, and those',
+  'are checked against the record. Agreement means the file describes the key that',
+  'signed it; it is still consistency, and never identity.',
 ].join('\n  ');
 
 export class InvalidPublicKeyFileError extends Error {
@@ -143,6 +148,7 @@ export function readIssuerPublicKeyFile(path: string): LoadedIssuerPublicKey {
 
   return {
     publicKey: Uint8Array.from(Buffer.from(file.publicKey, 'hex')),
+    algorithm: file.algorithm,
     kid: file.kid,
     issuer: file.issuer,
   };

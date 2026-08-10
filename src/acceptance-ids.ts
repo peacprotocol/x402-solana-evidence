@@ -98,6 +98,17 @@ export const ACCEPTANCE_CASES = {
   'EVID-CLI-002': { description: 'a public key that did not sign the record fails at the signature stage', scope: 'local' },
   'EVID-CLI-003': { description: 'a malformed public key file is refused with the file and the reason named', scope: 'local' },
   /**
+   * What a key file says about itself, against what the record says.
+   *
+   * Only the key bytes decide a signature. The algorithm, key identifier and issuer a file
+   * declares are a description of those bytes, and a description that disagrees with the record is
+   * reported as its own failure. Agreement is consistency, never identity.
+   */
+  'KEYMETA-001': { description: 'a key file naming a different key identifier is reported as inconsistent', scope: 'local' },
+  'KEYMETA-002': { description: 'a key file naming a different issuer is reported as inconsistent', scope: 'local' },
+  'KEYMETA-003': { description: 'a key file whose declared metadata matches the record verifies', scope: 'local' },
+  'KEYMETA-004': { description: 'key bytes that did not sign the record still fail at the signature stage', scope: 'local' },
+  /**
    * Exercised through an injected status source rather than a socket. What is being tested is how
    * this example records a second observer, not whether a Solana node answers; the endpoint-backed
    * source is the one line these cases deliberately do not run, and a live run covers it.

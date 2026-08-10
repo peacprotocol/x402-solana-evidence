@@ -223,8 +223,10 @@ corepack pnpm@8.15.0 verify -- --evidence out/devnet-<timestamp> \
 
 A supplied public key makes the record cryptographically verifiable. It is not an independently
 trusted identity: it says nothing about who holds the matching private key, and a key that travelled
-with the evidence establishes internal consistency only. `pnpm verify` with no arguments remains a
-check of the committed fixture directory under its test key.
+with the evidence establishes internal consistency only. The algorithm, key identifier and issuer
+the key file declares are checked against the record and reported as three separate named checks,
+which says whether the file describes the key that signed it and nothing more. `pnpm verify` with no
+arguments remains a check of the committed fixture directory under its test key.
 
 ### Endpoints a devnet run may contact
 

@@ -52,6 +52,7 @@ import {
   InvalidPublicKeyFileError,
   readIssuerPublicKeyFile,
   writeIssuerPublicKeyFile,
+  type LoadedIssuerPublicKey,
 } from './flow/public-key-file.ts';
 import {
   parseVerifyArguments,
@@ -259,6 +260,92 @@ recordExecution('EVID-CLI-003');
       }
     })(),
   );
+}
+
+// ---------------------------------------------------------------------------------------------
+// What a key file says about itself, against what the record says.
+// ---------------------------------------------------------------------------------------------
+
+console.log('\nSupplied key metadata, against the signed record\n');
+
+{
+  /** Write a key file carrying the fixture key bytes under whatever description is asked for. */
+  const describedAs = (name: string, kid: string, iss: string): LoadedIssuerPublicKey => {
+    const path = join(workspace, name);
+    writeIssuerPublicKeyFile(path, { publicKey: fixtureKey.publicKey, kid, iss });
+    return readIssuerPublicKeyFile(path);
+  };
+  const metadataOf = (key: LoadedIssuerPublicKey) => ({
+    algorithm: key.algorithm,
+    kid: key.kid,
+    issuer: key.issuer,
+  });
+  const named = (report: EvidenceVerificationReport, name: string) =>
+    report.checks.find((c) => c.name === name);
+
+  const KID_CHECK = 'supplied key identifier matches the record';
+  const ISSUER_CHECK = 'supplied key issuer matches the record';
+  const ALGORITHM_CHECK = 'supplied key algorithm';
+
+  recordExecution('KEYMETA-001');
+  {
+    const key = describedAs('wrong-kid.pub.json', 'a-key-identifier-the-record-does-not-name', fixtureKey.iss);
+    const report = await verifyEvidence(EXPECTED_EVIDENCE_DIR, key.publicKey, metadataOf(key));
+
+    check('the signature still verifies, because the bytes are right', named(report, 'record signature and schema')?.ok === true);
+    check('but the declared key identifier is reported as inconsistent', named(report, KID_CHECK)?.ok === false);
+    check('and the issuer, which does agree, is reported as agreeing', named(report, ISSUER_CHECK)?.ok === true);
+    check('so the directory does not verify overall', report.ok === false);
+  }
+
+  recordExecution('KEYMETA-002');
+  {
+    const key = describedAs('wrong-issuer.pub.json', fixtureKey.kid, 'https://elsewhere.example.test');
+    const report = await verifyEvidence(EXPECTED_EVIDENCE_DIR, key.publicKey, metadataOf(key));
+
+    check('the signature still verifies, because the bytes are right', named(report, 'record signature and schema')?.ok === true);
+    check('but the declared issuer is reported as inconsistent', named(report, ISSUER_CHECK)?.ok === false);
+    check('and the key identifier, which does agree, is reported as agreeing', named(report, KID_CHECK)?.ok === true);
+    check('so the directory does not verify overall', report.ok === false);
+  }
+
+  recordExecution('KEYMETA-003');
+  {
+    const key = describedAs('matching.pub.json', fixtureKey.kid, fixtureKey.iss);
+    const report = await verifyEvidence(EXPECTED_EVIDENCE_DIR, key.publicKey, metadataOf(key));
+
+    check('a key file that describes the signing key verifies', report.ok, failedChecks(report).join(', ') || 'nothing failed');
+    check('the algorithm is reported as its own check', named(report, ALGORITHM_CHECK)?.ok === true);
+    check('the key identifier is reported as its own check', named(report, KID_CHECK)?.ok === true);
+    check('the issuer is reported as its own check', named(report, ISSUER_CHECK)?.ok === true);
+
+    // A key file declaring an algorithm this example does not verify under is refused as a file,
+    // so the report's own check is exercised directly to prove it is live rather than decorative.
+    const wrongAlgorithm = await verifyEvidence(EXPECTED_EVIDENCE_DIR, key.publicKey, {
+      ...metadataOf(key),
+      algorithm: 'RSA',
+    });
+    check('a declared algorithm this example does not verify under fails its check', named(wrongAlgorithm, ALGORITHM_CHECK)?.ok === false);
+    check('and that alone stops the directory verifying', wrongAlgorithm.ok === false);
+  }
+
+  recordExecution('KEYMETA-004');
+  {
+    const other = await generateKeypair();
+    const path = join(workspace, 'other-bytes.pub.json');
+    writeIssuerPublicKeyFile(path, {
+      publicKey: other.publicKey,
+      kid: fixtureKey.kid,
+      iss: fixtureKey.iss,
+    });
+    const key = readIssuerPublicKeyFile(path);
+    const report = await verifyEvidence(EXPECTED_EVIDENCE_DIR, key.publicKey, metadataOf(key));
+
+    // Metadata that agrees changes nothing: the bytes did not sign this record, and that is
+    // reported at the signature stage with nothing downstream claimed to have been checked.
+    check('key bytes that did not sign the record fail at the signature stage', named(report, 'record signature and schema')?.ok === false);
+    check('and no metadata check is reported as having run', report.checks.length === 1, report.checks.map((c) => c.name).join(', '));
+  }
 }
 
 // ---------------------------------------------------------------------------------------------

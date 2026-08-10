@@ -160,6 +160,10 @@ trusted identity.** It says nothing about who holds the matching private key, an
 from the same place as the evidence establishes internal consistency only. An identity claim needs a
 key obtained through a channel independent of the evidence, and this example provides none.
 
+The algorithm, key identifier and issuer the key file declares are checked against the record and
+reported as three separate named checks. Agreement means the file describes the key that signed the
+record; it is still consistency, and never identity.
+
 ## What verification establishes
 
 Successful verification establishes that a signed record has not been altered since it was signed,
