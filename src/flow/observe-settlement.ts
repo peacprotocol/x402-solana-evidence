@@ -31,7 +31,12 @@ export const PROFILE_CHAIN_OBSERVATION =
 export interface ObservationSource {
   /** `facilitator` when a settlement service reported it; `rpc` when a node was queried. */
   readonly kind: 'facilitator' | 'rpc' | 'in_process_fixture';
-  /** Endpoint or component that answered. Never a credential. */
+  /**
+   * Endpoint origin, or the component that answered.
+   *
+   * Never a path, query, fragment or credential: an endpoint is named by its origin alone, so a
+   * token carried in any other part of a configured URL cannot reach this document.
+   */
   readonly reference: string;
 }
 

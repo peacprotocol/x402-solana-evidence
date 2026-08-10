@@ -40,9 +40,12 @@ import { resolveIssuerKey } from './flow/issuer-key.ts';
 import { observeSettlement } from './flow/observe-settlement.ts';
 import {
   observeTransaction,
+  publicEndpointReference,
+  solanaRpcSource,
   type TransactionStatus,
   type TransactionStatusSource,
 } from './flow/observe-transaction.ts';
+import { facilitatorReference } from './flow/devnet-demo.ts';
 import {
   InvalidPublicKeyFileError,
   readIssuerPublicKeyFile,
@@ -461,6 +464,148 @@ recordExecution('SVM-RPC-002');
 
   rmSync(directory, { recursive: true, force: true });
   rmSync(tamperedDirectory, { recursive: true, force: true });
+}
+
+// ---------------------------------------------------------------------------------------------
+// Endpoint references, against URLs built to leak.
+// ---------------------------------------------------------------------------------------------
+
+console.log('\nEndpoint references, against URLs built to leak\n');
+
+/** Every file under a directory, so a scan cannot miss one by not knowing it exists. */
+function filesUnder(directory: string): string[] {
+  const found: string[] = [];
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) found.push(...filesUnder(path));
+    else found.push(path);
+  }
+  return found;
+}
+
+/**
+ * Everything an evidence directory would show a reader, as text.
+ *
+ * The record is a compact JWS, so its payload is decoded as well: a value that reached the record
+ * would otherwise sit behind base64 and pass a plain substring scan.
+ */
+function emittedText(directory: string): string {
+  const parts: string[] = [];
+  for (const file of filesUnder(directory)) {
+    const text = readFileSync(file, 'utf8');
+    parts.push(text);
+    if (file.endsWith('record.jws')) {
+      const payload = text.trim().split('.')[1];
+      if (payload !== undefined) parts.push(Buffer.from(payload, 'base64url').toString('utf8'));
+    }
+  }
+  return parts.join('\n');
+}
+
+{
+  const leakyRun = await runOnce();
+
+  const cases = [
+    {
+      id: 'RED-URL-001' as const,
+      label: 'userinfo and password',
+      url: 'https://ruser:PASSWORDSECRET1@rpc.example.test/',
+      forbidden: ['ruser', 'PASSWORDSECRET1'],
+    },
+    {
+      id: 'RED-URL-002' as const,
+      label: 'a token in the path',
+      url: 'https://rpc.example.test/PATHSEGMENTSECRET/PATHTOKENSECRET2',
+      forbidden: ['PATHTOKENSECRET2', 'PATHSEGMENTSECRET'],
+    },
+    {
+      id: 'RED-URL-003' as const,
+      label: 'an API key in the query',
+      url: 'https://rpc.example.test/?apiKey=QUERYSECRET3',
+      forbidden: ['QUERYSECRET3', 'apiKey'],
+    },
+    {
+      id: 'RED-URL-004' as const,
+      label: 'a fragment',
+      url: 'https://rpc.example.test/#FRAGMENTSECRET4',
+      forbidden: ['FRAGMENTSECRET4'],
+    },
+  ];
+
+  const ORIGIN = 'https://rpc.example.test';
+
+  for (const { id, label, url, forbidden } of cases) {
+    recordExecution(id);
+
+    // The reference is derived by the same constructor the live run uses. Building the source
+    // opens nothing: only calling `status` would, and this never does.
+    const derived = solanaRpcSource(url).reference;
+    check(`${label}: the node reference is the origin alone`, derived === ORIGIN, derived);
+    check(
+      `${label}: the facilitator reference is the origin alone`,
+      facilitatorReference(url) === ORIGIN,
+      facilitatorReference(url),
+    );
+
+    const source: TransactionStatusSource = {
+      reference: derived,
+      status: async () => ({
+        slot: F.OBSERVED_SLOT,
+        commitment: F.COMMITMENT_LEVEL,
+        reportedTransactionError: false,
+      }),
+    };
+    const observation = await observeTransaction({
+      source,
+      transactionSignature: TRANSACTION,
+      observedAtUnixSeconds: OBSERVED_AT,
+    });
+
+    const layout = await buildEvidence(leakyRun, {
+      ...FIXTURE_EVIDENCE_OPTIONS,
+      observationSource: { kind: 'facilitator', reference: facilitatorReference(url) },
+      rpcObservation: observation,
+    });
+    const directory = mkdtempSync(join(tmpdir(), 'peac-evidence-redaction-'));
+    writeEvidence(directory, layout);
+    const emitted = emittedText(directory);
+
+    for (const secret of forbidden) {
+      check(`${label}: the evidence carries no ${secret}`, !emitted.includes(secret));
+    }
+    check(
+      `${label}: the evidence still names the endpoint by its origin`,
+      emitted.includes(ORIGIN),
+    );
+    const report = await verifyEvidence(directory, fixtureKey.publicKey);
+    check(
+      `${label}: and the evidence still verifies`,
+      report.ok,
+      failedChecks(report).join(', ') || 'nothing failed',
+    );
+
+    rmSync(directory, { recursive: true, force: true });
+  }
+
+  // A value that is not an endpoint publishes nothing, rather than publishing a guess at one.
+  check(
+    'a non-HTTP scheme has no publishable origin',
+    publicEndpointReference('file:///etc/passwd') === undefined,
+    String(publicEndpointReference('file:///etc/passwd')),
+  );
+  check('a value that is not a URL publishes nothing', publicEndpointReference('rpc') === undefined);
+  check('an absent value publishes nothing', publicEndpointReference(undefined) === undefined);
+
+  // A more specific identity is stated by a caller, never derived from the configured value.
+  check(
+    'an explicitly supplied label is published as given',
+    publicEndpointReference('https://rpc.example.test/v1/TOKEN', 'devnet node, operator supplied') ===
+      'devnet node, operator supplied',
+  );
+  check(
+    'a label that is not plainly safe is refused rather than reshaped',
+    publicEndpointReference(undefined, 'https://rpc.example.test/v1/TOKEN?k=1') === undefined,
+  );
 }
 
 // ---------------------------------------------------------------------------------------------

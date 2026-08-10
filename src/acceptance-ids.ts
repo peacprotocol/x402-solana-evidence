@@ -104,6 +104,18 @@ export const ACCEPTANCE_CASES = {
    */
   'SVM-RPC-001': { description: 'a node status is recorded as a separate observation naming its source', scope: 'local' },
   'SVM-RPC-002': { description: 'an unavailable node is recorded honestly and does not cost the run its evidence', scope: 'local' },
+  /**
+   * Endpoint references, against URLs built to leak.
+   *
+   * Each case drives the real derivation used by the live run and then string-scans everything the
+   * evidence emission wrote, because the property is about what reaches a published document
+   * rather than about what one function returns.
+   */
+  'RED-URL-001': { description: 'userinfo and password in an endpoint URL never reach the evidence', scope: 'local' },
+  'RED-URL-002': { description: 'a token carried in an endpoint path never reaches the evidence', scope: 'local' },
+  'RED-URL-003': { description: 'an API key carried in an endpoint query never reaches the evidence', scope: 'local' },
+  'RED-URL-004': { description: 'an endpoint fragment never reaches the evidence', scope: 'local' },
+
   'EVID-TX-001': { description: 'an interrupted emission leaves no final evidence directory', scope: 'local' },
   'EVID-TX-002': { description: 'an existing evidence directory is never overwritten or written into', scope: 'local' },
 

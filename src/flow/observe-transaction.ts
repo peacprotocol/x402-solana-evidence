@@ -31,7 +31,12 @@ export interface TransactionStatus {
 }
 
 export interface TransactionStatusSource {
-  /** Endpoint identity, safe to publish: origin and path only, never a credential. */
+  /**
+   * Endpoint identity, safe to publish: the origin only.
+   *
+   * Never a path, query, fragment or userinfo component, because any of them can carry a
+   * credential and this value is signed into a document meant to be handed to someone else.
+   */
   readonly reference: string;
   /**
    * Ask about one transaction.
@@ -58,21 +63,45 @@ export interface RpcTransactionObservationV1 {
 }
 
 /**
+ * A label a caller states outright, rather than one derived from a configured value.
+ *
+ * Bounded to characters that cannot be mistaken for structure, so a label can never smuggle in the
+ * part of a URL this function exists to drop.
+ */
+const SAFE_LABEL = /^[A-Za-z0-9][A-Za-z0-9 ,.:_-]{0,79}$/;
+
+/**
  * An endpoint named without anything that could be a credential.
  *
- * Only the origin and path survive: userinfo, query and fragment are dropped rather than trusted to
- * be harmless, because this value is written into a document meant to be published.
+ * ONLY THE ORIGIN SURVIVES. Scheme, host and port, and nothing else. Userinfo, password, path,
+ * query and fragment are all dropped rather than judged: hosted endpoint providers routinely put
+ * an API token in the path, so a path is not a safer thing to publish than a query string, and
+ * this value is signed into a document meant to be handed to someone else.
  *
- * @returns The publishable form, or `undefined` when the value is not a URL.
+ * A more specific human-readable identity is therefore never derived. It has to be supplied, as
+ * `safeLabel`, by a caller stating what it wants published; a label that is not plainly safe is
+ * refused rather than trimmed into shape.
+ *
+ * @param configured - The configured endpoint, exactly as it arrived.
+ * @param safeLabel - An explicitly supplied identity to publish instead of the derived origin.
+ * @returns The publishable form, or `undefined` when there is nothing safe to publish.
  */
-export function publicEndpointReference(configured: string | undefined): string | undefined {
+export function publicEndpointReference(
+  configured: string | undefined,
+  safeLabel?: string,
+): string | undefined {
+  if (safeLabel !== undefined) return SAFE_LABEL.test(safeLabel) ? safeLabel : undefined;
   if (configured === undefined || configured.trim().length === 0) return undefined;
+  let url: URL;
   try {
-    const url = new URL(configured);
-    return `${url.origin}${url.pathname}`;
+    url = new URL(configured);
   } catch {
     return undefined;
   }
+  // A non-HTTP scheme has no meaningful origin: `URL` reports it as the string "null", which would
+  // be published as though it were an endpoint identity.
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return undefined;
+  return url.origin;
 }
 
 /** Fixed reasons. An endpoint's own message is never retained: it can embed anything. */

@@ -82,10 +82,12 @@ const USDC_DECIMALS = 6;
 /**
  * Name the facilitator that answered, without carrying anything that could be a credential.
  *
- * Only the origin and path survive: userinfo, query and fragment are dropped rather than trusted to
- * be harmless, because this value is written into a document meant to be published.
+ * Only the origin survives: userinfo, password, path, query and fragment are all dropped rather
+ * than trusted to be harmless, because this value is written into a document meant to be
+ * published. A facilitator endpoint is as likely to carry a token in its path as a node endpoint
+ * is, so both go through the same reduction.
  */
-function facilitatorReference(configured: string | undefined): string {
+export function facilitatorReference(configured: string | undefined): string {
   if (configured === undefined || configured.trim().length === 0) {
     return 'the upstream default x402 facilitator';
   }
