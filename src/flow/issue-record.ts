@@ -39,6 +39,8 @@ export const EXPECTED_EVIDENCE_DIR = join(APP_ROOT, 'fixtures', 'expected-eviden
 export const EXPECTED_EVIDENCE_DISPLAY = 'fixtures/expected-evidence';
 /** Where a live run writes its evidence. Gitignored: it describes one run, not a fixture. */
 export const runEvidenceDir = (runId: string): string => join(APP_ROOT, 'out', runId);
+/** Repository-relative name for a live run's directory, so no machine-specific path is printed. */
+export const runEvidenceDisplay = (runId: string): string => `out/${runId}`;
 
 /** Registered PEAC record type for commerce evidence. */
 export const RECORD_TYPE = 'org.peacprotocol/payment';
@@ -56,8 +58,11 @@ export interface ObservedFieldDigests {
 
 export interface EvidenceInputs {
   readonly issuerKey: IssuerKey;
-  /** Record identifier. Supplied so an offline run reproduces byte for byte. */
-  readonly jti: string;
+  /**
+   * Record identifier. Supplied so an offline run reproduces byte for byte. A live run omits it
+   * and issuance generates one, because a run that happened once has nothing to reproduce.
+   */
+  readonly jti?: string;
   /** When the interaction happened, as an RFC 3339 timestamp. */
   readonly occurredAt: string;
   /** Pinned issued-at time, in Unix seconds. Offline only; a live run uses the real clock. */

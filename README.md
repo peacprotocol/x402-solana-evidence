@@ -202,7 +202,7 @@ proxy trust before treating a forwarded scheme or authority as trusted.
 | offline verification from files and a public key | implemented |
 | tamper detection | implemented |
 | settlement observation and chain-observation documents | implemented |
-| live Solana devnet run | manual acceptance step, see the [walkthrough](docs/WALKTHROUGH.md) |
+| live Solana devnet run | manual acceptance step; emits and verifies evidence under `out/`, see the [walkthrough](docs/WALKTHROUGH.md) |
 | scheme `upto` | out of scope |
 | batch settlement | out of scope |
 | streaming responses | out of scope |
@@ -245,7 +245,7 @@ pnpm demo:offline                # binding walkthrough with egress diagnostics i
 pnpm verify                      # verify the committed evidence
 pnpm tamper-demo                 # tamper demonstration, exits non-zero if an edit is not caught
 pnpm demo:devnet:prepare         # devnet preflight, fails closed with funding instructions
-pnpm demo:devnet                 # live devnet run, spends devnet funds
+pnpm demo:devnet                 # live devnet run, spends devnet funds, writes evidence to out/
 pnpm gen:golden                  # regenerate the vectors, then review the diff
 ```
 

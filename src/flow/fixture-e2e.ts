@@ -32,8 +32,8 @@ import { buildOriginResultBinding, buildRequestBinding } from '../binding.ts';
 import { componentsFromAbsoluteUri } from '../components.ts';
 import type { Sha256Digest } from '../digest.ts';
 import * as F from '../../fixtures/deterministic.ts';
-import { resolveIssuerKey } from './issuer-key.ts';
-import { observeSettlement } from './observe-settlement.ts';
+import { resolveIssuerKey, type RunMode } from './issuer-key.ts';
+import { observeSettlement, type ObservationSource } from './observe-settlement.ts';
 import {
   EXPECTED_EVIDENCE_DIR,
   EXPECTED_EVIDENCE_DISPLAY,
@@ -190,14 +190,62 @@ function determinismNote(): string {
 }
 
 /**
+ * What differs between an offline run and a live one.
+ *
+ * Only these values. The capture, binding, issuance and verification path below is the same code in
+ * both modes, so a live run cannot drift into a second evidence model: it supplies its own issuer
+ * key, resource identity, observation source and clock, and nothing else changes.
+ */
+export interface EvidenceOptions {
+  /** Selects the issuer key: the fixed test key, or the local devnet demonstration key. */
+  readonly mode: RunMode;
+  /** Resource identity that reaches the binding. Always the configured URL, never a socket address. */
+  readonly resourceUrl: string;
+  readonly requestBody: Uint8Array;
+  /** Supplied offline so the record bytes reproduce; omitted live, where issuance generates one. */
+  readonly jti?: string;
+  /** Observation time, and the instant the record reports the interaction occurred. */
+  readonly observedAtUnixSeconds: number;
+  /** Pins the issued-at claim. Offline only: a live run stamps it from the real clock. */
+  readonly issuedAtUnixSeconds?: number;
+  readonly observationSource: ObservationSource;
+  readonly assetDecimals: number;
+  /** Payment identifier the client sent, when the payment-identifier extension was in play. */
+  readonly paymentReference?: string;
+  readonly currency: string;
+  readonly environment: 'live' | 'test';
+}
+
+/** The offline run's inputs: fixed key, fixed clock, fixed identifiers, no network contacted. */
+export const FIXTURE_EVIDENCE_OPTIONS: EvidenceOptions = {
+  mode: 'fixture',
+  resourceUrl: F.RESOURCE_URL,
+  requestBody: F.REQUEST_BODY,
+  jti: FIXTURE_JTI,
+  observedAtUnixSeconds: F.FIXED_NOW_UNIX_SECONDS,
+  issuedAtUnixSeconds: F.FIXED_NOW_UNIX_SECONDS,
+  observationSource: {
+    kind: 'in_process_fixture',
+    reference: 'offline run, no facilitator and no node were contacted',
+  },
+  assetDecimals: F.TOKEN_DECIMALS,
+  paymentReference: F.PAYMENT_ID,
+  currency: 'USDC',
+  environment: 'test',
+};
+
+/**
  * Turn one run into an evidence layout.
  *
  * Every observed field value goes through the same staged capture the rest of the profile uses, so
  * the digest that reaches the record is over a value that was accepted at the capture boundary
  * rather than over whatever bytes happened to arrive.
  */
-export async function buildEvidence(run: RunResult): Promise<EvidenceLayout> {
-  const issuerKey = await resolveIssuerKey('fixture');
+export async function buildEvidence(
+  run: RunResult,
+  options: EvidenceOptions = FIXTURE_EVIDENCE_OPTIONS,
+): Promise<EvidenceLayout> {
+  const issuerKey = await resolveIssuerKey(options.mode);
 
   const observedRequired = run.challenge.observedHeaders['payment-required'];
   if (observedRequired === undefined) throw new Error('no payment-required field was observed');
@@ -256,8 +304,8 @@ export async function buildEvidence(run: RunResult): Promise<EvidenceLayout> {
   // The resource is identified by its configured URL, not by the loopback address the process
   // happened to be given, so the binding describes the resource rather than the test harness.
   const requestBinding = buildRequestBinding({
-    components: componentsFromAbsoluteUri({ method: 'GET', absoluteUri: F.RESOURCE_URL }),
-    body: F.REQUEST_BODY,
+    components: componentsFromAbsoluteUri({ method: 'GET', absoluteUri: options.resourceUrl }),
+    body: options.requestBody,
     selectedHeaders:
       signatureArtifact === undefined
         ? []
@@ -286,19 +334,18 @@ export async function buildEvidence(run: RunResult): Promise<EvidenceLayout> {
       : {}),
     ...(serviceResultDigest !== undefined ? { serviceResultDigest } : {}),
     lifecycle: run.origin.lifecycle,
-    observationSource: {
-      kind: 'in_process_fixture',
-      reference: 'offline run, no facilitator and no node were contacted',
-    },
-    observedAtUnixSeconds: F.FIXED_NOW_UNIX_SECONDS,
-    assetDecimals: F.TOKEN_DECIMALS,
+    observationSource: options.observationSource,
+    observedAtUnixSeconds: options.observedAtUnixSeconds,
+    assetDecimals: options.assetDecimals,
   });
 
   return issueEvidence({
     issuerKey,
-    jti: FIXTURE_JTI,
-    occurredAt: new Date(F.FIXED_NOW_UNIX_SECONDS * 1000).toISOString(),
-    issuedAtUnixSeconds: F.FIXED_NOW_UNIX_SECONDS,
+    ...(options.jti !== undefined ? { jti: options.jti } : {}),
+    occurredAt: new Date(options.observedAtUnixSeconds * 1000).toISOString(),
+    ...(options.issuedAtUnixSeconds !== undefined
+      ? { issuedAtUnixSeconds: options.issuedAtUnixSeconds }
+      : {}),
     requestBinding,
     ...(originResultBinding !== undefined ? { originResultBinding } : {}),
     ...(run.origin.originResult !== undefined
@@ -307,9 +354,11 @@ export async function buildEvidence(run: RunResult): Promise<EvidenceLayout> {
     observedFields,
     chainObservation,
     lifecycle: run.origin.lifecycle,
-    paymentReference: F.PAYMENT_ID,
-    currency: 'USDC',
-    environment: 'test',
+    ...(options.paymentReference !== undefined
+      ? { paymentReference: options.paymentReference }
+      : {}),
+    currency: options.currency,
+    environment: options.environment,
   });
 }
 

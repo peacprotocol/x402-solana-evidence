@@ -125,9 +125,41 @@ is the configured x402 facilitator, the client registers the upstream SVM exact 
 devnet keypair, and the transaction reference is real.
 
 The run prints the payer address, the recipient, the response status, the payment status, the
-lifecycle it reached and the transaction reference. It does not write into
-`fixtures/expected-evidence/`: that directory belongs to the reproducible fixture run and is
-checked byte for byte, so a live run must never overwrite it.
+lifecycle it reached and the transaction reference.
+
+### What the run writes
+
+It then emits evidence, through the same capture, binding, issuance and verification code the
+offline run uses. Only the inputs that genuinely differ are supplied: the devnet issuer key from
+`.local/keys/issuer.json`, the real clock, the configured facilitator as the observation source, and
+no supplied record identifier, because a run that happened once has no bytes to reproduce.
+
+Evidence is written to `out/<runId>/`, where `runId` is the instant the run was observed. That
+directory is gitignored: it describes one run rather than a fixture. It does not write into
+`fixtures/expected-evidence/`, which belongs to the reproducible fixture run and is checked byte for
+byte, so a live run must never overwrite it.
+
+```text
+out/devnet-<timestamp>/
+  record.jws                        the PEAC record issued for this run
+  request-binding.json              the operation that was requested
+  origin-result-binding.json        the result the origin produced, by digest
+  origin-result-body.bin            the bytes that digest covers
+  chain-observation.json            the settlement as this service observed it
+  artifacts/payment-required.txt    the challenge value the origin emitted
+  artifacts/payment-signature.txt   the payment value the client presented
+  artifacts/payment-response.txt    the settlement value the origin emitted
+  verification-report.txt           the verification below, as printed
+```
+
+Which of those exist depends on where the run ended: the artifact presence contract below is the
+same in both modes, and a live run that failed at verification or settlement writes the smaller set
+that state declares.
+
+The run then verifies what it wrote, from those files and the public key alone, and prints the
+report. It exits non-zero if that verification does not pass, so a run cannot leave behind evidence
+it never checked. `pnpm verify` remains a check of the committed fixture directory; a live run
+verifies its own output as it finishes.
 
 ### Endpoints a devnet run may contact
 
