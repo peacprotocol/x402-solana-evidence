@@ -102,6 +102,19 @@ export const ACCEPTANCE_CASES = {
   'KEY-FC-002': { description: 'a payer key file of the wrong length is refused and left unchanged', scope: 'local' },
   'KEY-FC-003': { description: 'a payer key file whose halves do not match is refused and left unchanged', scope: 'local' },
   'KEY-FC-004': { description: 'an issuer key file with an unusable private key is refused and left unchanged', scope: 'local' },
+
+  /**
+   * Preflight revalidation and recipient validation. Only the pre-network failure paths are
+   * exercised here, which is exactly what these cases are about: a live run must stop on local
+   * grounds before it reaches for a connection, and that is decidable offline. The passing live
+   * path stays with SVM-FLOW-004, where a network exists.
+   */
+  'PRE-RV-001': { description: 'a live run with no payer key stops before any network call', scope: 'local' },
+  'PRE-RV-002': { description: 'a live run with an invalid recipient stops before any network call', scope: 'local' },
+  'PRE-ADDR-001': { description: 'a valid Solana address is accepted as the recipient', scope: 'local' },
+  'PRE-ADDR-002': { description: 'a recipient that is not valid base58 is rejected', scope: 'local' },
+  'PRE-ADDR-003': { description: 'a recipient of the wrong length is rejected', scope: 'local' },
+  'PRE-ADDR-004': { description: 'a recipient carrying whitespace is rejected rather than trimmed', scope: 'local' },
 } as const satisfies Record<string, AcceptanceCase>;
 
 export type AcceptanceId = keyof typeof ACCEPTANCE_CASES;

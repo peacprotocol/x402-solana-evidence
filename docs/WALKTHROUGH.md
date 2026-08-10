@@ -92,27 +92,38 @@ pnpm demo:devnet:prepare
 
 The preflight checks everything before anything is signed:
 
-1. the configured network is Solana devnet, the asset is the devnet USDC mint, and a recipient is
-   configured;
+1. the configured network is Solana devnet, the asset is the devnet USDC mint, and the recipient is
+   a real Solana address. The recipient is validated as an address here, before any connection is
+   opened, so a typo stops the run instead of being discovered by the chain after a payment has
+   been built and signed. Whitespace around it is refused rather than trimmed, because trimming
+   would guess at the intent and could pay a different address than the one configured;
 2. a devnet payer key exists at `.local/keys/payer.json`, or one is created there with owner-only
    permissions. It is created once and reused, because regenerating it would strand every previous
-   airdrop. Only the public address is ever printed;
+   airdrop. Only the public address is ever printed. A key file that exists but cannot be read as a
+   key is refused and left exactly as it is, never replaced;
 3. the RPC endpoint's genesis hash matches the devnet CAIP-2 identifier, so a misconfigured
    endpoint fails here rather than halfway through a payment;
-4. the payer holds enough devnet SOL and devnet USDC;
+4. the payer holds enough devnet USDC. Its SOL balance is reported but required of nothing: see
+   below;
 5. the configured facilitator advertises the exact scheme on that network.
 
 It fails closed and prints the payer address you need to fund.
 
 ### Funding
 
-Both faucets are public and take the payer address printed by the preflight.
+The payer needs devnet USDC, from the Circle testnet faucet, <https://faucet.circle.com>,
+selecting Solana devnet. The faucet takes the payer address printed by the preflight.
 
-- Devnet SOL: the public Solana devnet faucet, <https://faucet.solana.com>.
-- Devnet USDC: the Circle testnet faucet, <https://faucet.circle.com>, selecting Solana devnet.
+**The payer does not need devnet SOL.** In the exact scheme the transaction fee is paid by the
+facilitator, not by the payer: the resource server advertises the facilitator's own address as the
+fee payer, the client sets that address as the transaction's fee payer and only partially signs,
+and the facilitator refuses any payment whose fee payer is not one of its own. The payer signs
+solely as the authority on the token transfer, which moves USDC and spends none of its own
+lamports. The preflight prints the SOL balance because it is useful to see, and gates nothing on
+it.
 
-Re-run the preflight until every check passes. It records a marker on success, and the live
-demonstration refuses to start without one.
+Re-run the preflight until every check passes. It records that a wallet was prepared here, which is
+a convenience for you and nothing more: the live run repeats every check itself.
 
 ### Run
 
@@ -169,7 +180,7 @@ Three, and no others:
 2. the x402 facilitator, default or `PEAC_EXAMPLE_FACILITATOR_URL`;
 3. the loopback origin this process itself started.
 
-The public faucets are contacted by you, in a browser, not by this code. Nothing else in the
+The public faucet is contacted by you, in a browser, not by this code. Nothing else in the
 example opens a connection, which is why the fixture path passes in a container with no network
 interface at all.
 
@@ -265,14 +276,24 @@ reproducing the committed evidence. Read the diff before regenerating anything: 
 record bytes alone points at the issuance inputs, while a change in a sidecar document points at
 what the run observed.
 
-**`pnpm demo:devnet` says no passed preflight was found.** Run `pnpm demo:devnet:prepare` first. It
-records a marker under `.local/` only when every check passed.
+**`pnpm demo:devnet` stops on a preflight failure.** It runs the whole preflight itself, against
+current conditions, immediately before building anything, so read the failed check and resolve it
+the same way you would for `pnpm demo:devnet:prepare`. Nothing was built, signed or sent.
+
+**`pnpm demo:devnet` says there is no payer key.** Run `pnpm demo:devnet:prepare`, which creates
+one and prints the address to fund. The live run never creates a key itself: a fresh one would be
+unfunded, and the run would fail in the middle of a payment rather than before it.
 
 **The preflight reports the wrong genesis hash.** `PEAC_EXAMPLE_RPC_URL` points at a cluster that
 is not devnet. This example supports Solana devnet only.
 
-**The preflight reports insufficient balances.** Fund the printed payer address at the two faucets
-above and run it again. The payer key is reused, so previously funded balances are not lost.
+**The preflight reports insufficient USDC.** Fund the printed payer address at the Circle testnet
+faucet above and run it again. The payer key is reused, so previously funded balances are not lost.
+A zero SOL balance is not a failure and does not need funding.
+
+**The preflight refuses an existing key file.** A key file that cannot be read as a key is never
+replaced, because replacing it would destroy a key that may hold funds. Move or repair the named
+file yourself, then run the preflight again.
 
 ## What a successful verification means
 

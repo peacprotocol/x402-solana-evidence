@@ -6,9 +6,11 @@
  * registers the upstream SVM exact scheme with a real devnet keypair instead of a wallet
  * stand-in, and the transaction reference that appears in the evidence is a real one.
  *
- * It refuses to start unless a preflight has passed. A live run that begins without funds or
- * against the wrong endpoint produces a partial transcript, and a partial transcript of a payment
- * is worse than no transcript.
+ * It runs the entire preflight itself, immediately before building anything, rather than trusting
+ * that one passed earlier: an earlier pass describes conditions that have had time to change, and
+ * the file recording it authorizes nothing. A live run that begins without funds or against the
+ * wrong endpoint produces a partial transcript, and a partial transcript of a payment is worse
+ * than no transcript.
  *
  * EVIDENCE. A live run emits the same artifact set as the offline one, through the same code: the
  * capture, binding, issuance and verification path is `buildEvidence` from the offline run, called
@@ -21,8 +23,7 @@
  * This file and the preflight are the only parts of the reference flow that use the network.
  */
 import { writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { HTTPFacilitatorClient } from '@x402/core/server';
 import { SOLANA_DEVNET_CAIP2, USDC_DEVNET_ADDRESS, DEVNET_RPC_URL, toClientSvmSigner } from '@x402/svm';
@@ -35,16 +36,19 @@ import {
 } from '@x402/extensions/payment-identifier';
 import { createPaidResource, type RequestObservation } from './server.ts';
 import { fetchPaidResource } from './client.ts';
-import { readPreflightPass, PREFLIGHT_MARKER_PATH } from './preflight.ts';
-import { loadPayerSigner, PAYER_KEY_PATH } from './payer-key.ts';
+import {
+  printReport,
+  readPreflightPass,
+  runPreflight,
+  PREFLIGHT_MARKER_PATH,
+} from './preflight.ts';
+import { loadPayerSigner } from './payer-key.ts';
 import { displayKeyPath } from './key-file.ts';
 import { buildEvidence, RESOURCE_PATH, RESOURCE_QUERY } from './fixture-e2e.ts';
 import { runEvidenceDir, runEvidenceDisplay, writeEvidence } from './issue-record.ts';
 import { resolveIssuerKey } from './issuer-key.ts';
 import { formatReport, verifyEvidence } from './verify-evidence.ts';
 import type { ObservationSource } from './observe-settlement.ts';
-
-const APP_ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 
 /** Price of one call, in devnet USDC base units. Small, because it is spent for real on devnet. */
 const PRICE_BASE_UNITS = '10000';
@@ -84,36 +88,51 @@ function runIdFor(observedAtUnixSeconds: number): string {
 }
 
 export async function main(): Promise<void> {
-  const preflight = readPreflightPass();
-  if (preflight === undefined) {
-    console.error(
-      '\nNo passed preflight found.\n' +
-        '  Run: pnpm demo:devnet:prepare\n' +
-        `  It records its result at ${PREFLIGHT_MARKER_PATH.replace(APP_ROOT, '.')}\n`,
-    );
-    process.exit(1);
-  }
-
   const payTo = process.env['PEAC_EXAMPLE_PAY_TO'];
-  if (payTo === undefined || payTo.trim().length === 0) {
-    console.error('\nPEAC_EXAMPLE_PAY_TO is not set. It must name the recipient address.\n');
-    process.exit(1);
-  }
-
-  // Loaded, never created here: a live run uses the funded key the preflight prepared, and a
-  // freshly created one would be unfunded and would fail partway through.
-  const payer = await loadPayerSigner();
-  if (payer === undefined) {
-    console.error(
-      `\nNo payer key at ${displayKeyPath(PAYER_KEY_PATH)}.\n  Run: pnpm demo:devnet:prepare\n`,
-    );
-    process.exit(1);
-  }
-
   const configuredFacilitatorUrl = process.env['PEAC_EXAMPLE_FACILITATOR_URL'];
   const facilitatorClient = new HTTPFacilitatorClient(
     configuredFacilitatorUrl !== undefined ? { url: configuredFacilitatorUrl } : undefined,
   );
+
+  const prepared = readPreflightPass();
+  if (prepared === undefined) {
+    console.log(
+      `\nNo record of a prepared wallet at ${displayKeyPath(PREFLIGHT_MARKER_PATH)}.` +
+        '\n  If this run stops for want of funds, prepare one with: pnpm demo:devnet:prepare\n',
+    );
+  }
+
+  /**
+   * The whole preflight, again, here.
+   *
+   * Not a repetition of `demo:devnet:prepare` for its own sake: that run proved a state that has
+   * since had time to change. Balances get spent, endpoints move, a facilitator stops advertising
+   * a network, a key file gets edited. The conditions that matter are the ones holding now, a
+   * moment before this process builds and signs a payment, so they are established now. The marker
+   * file above says only whether someone has prepared a wallet here; it authorizes nothing.
+   *
+   * The payer key must already exist. A live run has to use the key that was funded, and quietly
+   * creating a fresh one would turn a clear stop here into a failure mid-payment.
+   */
+  const report = await runPreflight({
+    network: SOLANA_DEVNET_CAIP2,
+    payTo,
+    asset: USDC_DEVNET_ADDRESS,
+    rpcUrl: process.env['PEAC_EXAMPLE_RPC_URL'] ?? DEVNET_RPC_URL,
+    facilitatorClient,
+    payerKeyMode: 'require-existing',
+  });
+  printReport(report);
+  if (!report.ready) {
+    console.error('The live run stops here. Nothing was built, signed or sent.\n');
+    process.exit(1);
+  }
+
+  // Both established by the preflight that just passed: the recipient is a valid address, and the
+  // payer key exists. Narrowed rather than re-checked, so there is one place that decides.
+  if (payTo === undefined) throw new Error('the preflight passed without a recipient');
+  const payer = await loadPayerSigner();
+  if (payer === undefined) throw new Error('the preflight passed without a payer key');
 
   const resource = await createPaidResource({
     facilitatorClient,

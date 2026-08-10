@@ -11,28 +11,41 @@
  * here; it exercises only the local ones, which is why they are separated below.
  *
  * The payer key is created once and reused; how it is stored and reloaded lives in `payer-key.ts`.
+ *
+ * WHAT THE PAYER NEEDS, AND WHAT IT DOES NOT. The payer needs devnet USDC. It does not need devnet
+ * SOL, and this preflight does not require any. In the exact scheme the transaction fee is paid by
+ * the facilitator: the resource server advertises the facilitator's own address as the fee payer,
+ * the client sets that address as the transaction's fee payer and only partially signs, and the
+ * facilitator refuses a payment whose fee payer is not one of its own. The payer signs solely as
+ * the authority on the token transfer, which moves USDC and spends no lamports of its own. The
+ * balance is still reported, because a reader benefits from seeing it, but it gates nothing.
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SOLANA_DEVNET_CAIP2, USDC_DEVNET_ADDRESS, DEVNET_RPC_URL } from '@x402/svm';
+import { isAddress } from '@solana/kit';
 import type { FacilitatorClient } from '@x402/core/server';
 import type { Network } from '@x402/core/types';
-import { resolvePayerSigner } from './payer-key.ts';
+import { displayKeyPath } from './key-file.ts';
+import { loadPayerSigner, PAYER_KEY_PATH, resolvePayerSigner } from './payer-key.ts';
 
 const APP_ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 
-/** Devnet SOL is only needed for the payer's own account rent and any client-side fees. */
-export const MIN_SOL_LAMPORTS = 10_000_000n;
 /** Enough devnet USDC to pay the demonstration price several times over. */
 export const MIN_USDC_BASE_UNITS = 1_000_000n;
 
 export const FUNDING_INSTRUCTIONS = [
-  'Devnet SOL: request an airdrop for the payer address from a public Solana devnet faucet.',
   'Devnet USDC: request test USDC for the payer address from the Circle testnet faucet.',
+  'Devnet SOL is not required: the facilitator pays the transaction fee in this scheme.',
 ].join('\n  ');
 
-export type CheckStatus = 'ok' | 'failed' | 'not_evaluated';
+/**
+ * `note` reports something worth seeing that decides nothing. It exists so an observation can be
+ * shown without being turned into a requirement, which is how a check nobody needs ends up
+ * blocking a run.
+ */
+export type CheckStatus = 'ok' | 'failed' | 'note' | 'not_evaluated';
 
 export interface PreflightCheck {
   readonly name: string;
@@ -50,10 +63,38 @@ export interface PreflightReport {
 
 const ok = (name: string, detail: string): PreflightCheck => ({ name, status: 'ok', detail });
 const failed = (name: string, detail: string): PreflightCheck => ({ name, status: 'failed', detail });
+const note = (name: string, detail: string): PreflightCheck => ({ name, status: 'note', detail });
 
 /** Create or reuse the devnet payer key and report the address a person needs to fund. */
 export async function resolvePayerAddress(): Promise<string> {
   return (await resolvePayerSigner()).address;
+}
+
+/**
+ * Check that the recipient is an address this network can actually pay.
+ *
+ * Configuration reaches this example as an environment variable, so it is a string that has never
+ * been checked by anything. Left unchecked, a typo is discovered by the chain, after a payment has
+ * been built and signed, which is the worst place to find it. It is decided here instead, using the
+ * same address rule the rest of the stack uses, before anything opens a connection.
+ *
+ * Whitespace is refused rather than trimmed. Trimming guesses at what was meant and quietly pays a
+ * different address than the one that was configured.
+ *
+ * @param payTo - The configured recipient, exactly as supplied.
+ */
+function recipientCheck(payTo: string | undefined): PreflightCheck {
+  const name = 'recipient is a Solana address';
+  if (payTo === undefined || payTo.length === 0) {
+    return failed(name, 'no recipient address configured for the paid resource');
+  }
+  if (payTo.trim() !== payTo) {
+    return failed(name, 'the configured recipient has leading or trailing whitespace');
+  }
+  if (!isAddress(payTo)) {
+    return failed(name, 'the configured recipient is not a Solana address');
+  }
+  return ok(name, payTo);
 }
 
 /**
@@ -78,12 +119,7 @@ export function checkLocalConfiguration(input: {
         ),
   );
 
-  const payTo = input.payTo?.trim();
-  checks.push(
-    payTo !== undefined && payTo.length > 0
-      ? ok('recipient configured', payTo)
-      : failed('recipient configured', 'no recipient address configured for the paid resource'),
-  );
+  checks.push(recipientCheck(input.payTo));
 
   checks.push(
     input.asset === USDC_DEVNET_ADDRESS
@@ -114,14 +150,11 @@ export async function checkChainState(payerAddress: string, rpcUrl: string): Pro
         ),
   );
 
+  // Reported, not required: the facilitator pays the transaction fee, so a payer with no SOL can
+  // still complete this flow. See the note at the top of this file for where that is decided.
   const lamports = (await rpc.getBalance(address(payerAddress)).send()).value;
   checks.push(
-    lamports >= MIN_SOL_LAMPORTS
-      ? ok('payer holds devnet SOL', `${lamports} lamports`)
-      : failed(
-          'payer holds devnet SOL',
-          `${lamports} lamports, at least ${MIN_SOL_LAMPORTS} required`,
-        ),
+    note('payer SOL balance', `${lamports} lamports, not required for this flow`),
   );
 
   const tokenAccounts = await rpc
@@ -170,24 +203,61 @@ export async function checkFacilitatorSupport(
       );
 }
 
+/**
+ * How the preflight obtains the payer key.
+ *
+ * `create-if-absent` is what preparing a wallet means: no key yet is the ordinary first run.
+ * `require-existing` is what a live run means: it must use the key that was funded, and creating a
+ * fresh unfunded one would only move the failure later, into the middle of a payment.
+ */
+export type PayerKeyMode = 'create-if-absent' | 'require-existing';
+
 export interface PreflightOptions {
   readonly network: Network;
   readonly payTo: string | undefined;
   readonly asset: string;
   readonly rpcUrl: string;
   readonly facilitatorClient: FacilitatorClient;
+  /** Defaults to `create-if-absent`. */
+  readonly payerKeyMode?: PayerKeyMode;
+  /** Where the payer key file lives. Defaults to the devnet payer key. */
+  readonly payerKeyPath?: string;
 }
 
-/** The full preflight. Fails closed: any failed check leaves the run not ready. */
+/**
+ * The full preflight. Fails closed: any failed check leaves the run not ready.
+ *
+ * Ordered so that everything decidable locally is decided first. A misconfigured recipient or a
+ * missing key is answered before a connection is opened, which keeps the failure cheap and keeps
+ * the offline suites able to exercise these paths for real.
+ */
 export async function runPreflight(options: PreflightOptions): Promise<PreflightReport> {
   const checks = checkLocalConfiguration(options);
   if (checks.some((c) => c.status === 'failed')) {
     return { ready: false, checks };
   }
-  const payerAddress = await resolvePayerAddress();
+
+  const keyPath = options.payerKeyPath ?? PAYER_KEY_PATH;
+  let payerAddress: string;
+  if (options.payerKeyMode === 'require-existing') {
+    const payer = await loadPayerSigner(keyPath);
+    if (payer === undefined) {
+      checks.push(
+        failed(
+          'payer key present',
+          `no payer key at ${displayKeyPath(keyPath)}; run pnpm demo:devnet:prepare to create and fund one`,
+        ),
+      );
+      return { ready: false, checks };
+    }
+    payerAddress = payer.address;
+  } else {
+    payerAddress = (await resolvePayerSigner(keyPath)).address;
+  }
+
   checks.push(...(await checkChainState(payerAddress, options.rpcUrl)));
   checks.push(await checkFacilitatorSupport(options.facilitatorClient, options.network));
-  return { ready: checks.every((c) => c.status === 'ok'), checks, payerAddress };
+  return { ready: !checks.some((c) => c.status !== 'ok' && c.status !== 'note'), checks, payerAddress };
 }
 
 /** Prints a report. The payer address is public and is the one value a person needs to fund. */
@@ -195,7 +265,14 @@ export function printReport(report: PreflightReport): void {
   console.log('\nDevnet preflight\n');
   if (report.payerAddress !== undefined) console.log(`  payer address : ${report.payerAddress}\n`);
   for (const check of report.checks) {
-    const mark = check.status === 'ok' ? 'ok  ' : check.status === 'failed' ? 'FAIL' : 'skip';
+    const mark =
+      check.status === 'ok'
+        ? 'ok  '
+        : check.status === 'failed'
+          ? 'FAIL'
+          : check.status === 'note'
+            ? 'note'
+            : 'skip';
     console.log(`  ${mark}  ${check.name}: ${check.detail}`);
   }
   if (!report.ready) {
@@ -205,7 +282,16 @@ export function printReport(report: PreflightReport): void {
   console.log('\nReady. The devnet demonstration can run.\n');
 }
 
-/** Marker file recording that a preflight passed, so the live demonstration can require one. */
+/**
+ * A note that a preflight once passed. It is convenience, and nothing else.
+ *
+ * It records a moment that has already gone: funds get spent, endpoints change, a facilitator drops
+ * a network, a key file is edited. Treating this file as permission to sign would mean deciding a
+ * live run against conditions that were true earlier and may not be true now, and the file itself
+ * is an ordinary writable file that anything on the machine could create. So nothing is authorized
+ * by its presence: the live run repeats the whole preflight against current conditions, and this
+ * only tells a person whether they have prepared a wallet before.
+ */
 export const PREFLIGHT_MARKER_PATH = join(APP_ROOT, '.local', 'devnet-preflight.json');
 
 export function recordPreflightPass(payerAddress: string): void {
@@ -216,6 +302,7 @@ export function recordPreflightPass(payerAddress: string): void {
   );
 }
 
+/** Read the marker. Its absence means nobody has prepared a wallet here, not that a run is unsafe. */
 export function readPreflightPass(): { payerAddress: string; passedAtUnixSeconds: number } | undefined {
   try {
     const parsed = JSON.parse(readFileSync(PREFLIGHT_MARKER_PATH, 'utf8')) as {
@@ -226,7 +313,7 @@ export function readPreflightPass(): { payerAddress: string; passedAtUnixSeconds
       return { payerAddress: parsed.payerAddress, passedAtUnixSeconds: parsed.passedAtUnixSeconds };
     }
   } catch {
-    // No marker means no preflight has passed, which the caller treats as not ready.
+    // Absent or unreadable. It carries no authority either way, so there is nothing to report.
   }
   return undefined;
 }
