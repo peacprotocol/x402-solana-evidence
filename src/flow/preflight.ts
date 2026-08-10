@@ -10,20 +10,17 @@
  * the reference flow opens a connection, and the offline path never calls the network-using checks
  * here; it exercises only the local ones, which is why they are separated below.
  *
- * The payer key is created once and reused. It is written to a gitignored directory with
- * owner-only permissions, and only its public address is ever printed: a key that appears in
- * output ends up in logs, terminal history and pasted transcripts.
+ * The payer key is created once and reused; how it is stored and reloaded lives in `payer-key.ts`.
  */
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SOLANA_DEVNET_CAIP2, USDC_DEVNET_ADDRESS, DEVNET_RPC_URL } from '@x402/svm';
 import type { FacilitatorClient } from '@x402/core/server';
 import type { Network } from '@x402/core/types';
+import { resolvePayerSigner } from './payer-key.ts';
 
 const APP_ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
-const KEY_DIR = join(APP_ROOT, '.local', 'keys');
-const PAYER_KEY_PATH = join(KEY_DIR, 'payer.json');
 
 /** Devnet SOL is only needed for the payer's own account rent and any client-side fees. */
 export const MIN_SOL_LAMPORTS = 10_000_000n;
@@ -54,39 +51,9 @@ export interface PreflightReport {
 const ok = (name: string, detail: string): PreflightCheck => ({ name, status: 'ok', detail });
 const failed = (name: string, detail: string): PreflightCheck => ({ name, status: 'failed', detail });
 
-/**
- * Create or reuse the devnet payer key.
- *
- * Regenerating per run would strand every previous airdrop, so an existing key is always reused
- * and the file is never overwritten.
- */
+/** Create or reuse the devnet payer key and report the address a person needs to fund. */
 export async function resolvePayerAddress(): Promise<string> {
-  const { createKeyPairSignerFromBytes, generateKeyPairSigner } = await import('@solana/kit');
-  try {
-    const stored = JSON.parse(readFileSync(PAYER_KEY_PATH, 'utf8')) as unknown;
-    if (!Array.isArray(stored)) throw new Error('payer key file is not a byte array');
-    const signer = await createKeyPairSignerFromBytes(Uint8Array.from(stored as number[]));
-    return signer.address;
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code !== 'ENOENT') {
-      if (!(e instanceof SyntaxError)) throw e;
-    }
-  }
-  const generated = await generateKeyPairSigner();
-  const exported = await crypto.subtle.exportKey('pkcs8', generated.keyPair.privateKey);
-  // The 32-byte seed sits at the end of the PKCS#8 encoding of an Ed25519 private key, followed
-  // by the public key, which is the byte layout the Solana tooling expects in a key file.
-  const seed = new Uint8Array(exported).slice(-32);
-  const publicKeyBytes = new Uint8Array(
-    await crypto.subtle.exportKey('raw', generated.keyPair.publicKey),
-  );
-  const keyFileBytes = new Uint8Array(64);
-  keyFileBytes.set(seed, 0);
-  keyFileBytes.set(publicKeyBytes, 32);
-  mkdirSync(KEY_DIR, { recursive: true, mode: 0o700 });
-  writeFileSync(PAYER_KEY_PATH, JSON.stringify([...keyFileBytes]), { mode: 0o600 });
-  chmodSync(PAYER_KEY_PATH, 0o600);
-  return generated.address;
+  return (await resolvePayerSigner()).address;
 }
 
 /**

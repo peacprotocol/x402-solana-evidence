@@ -20,7 +20,7 @@
  *
  * This file and the preflight are the only parts of the reference flow that use the network.
  */
-import { readFileSync, writeFileSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AddressInfo } from 'node:net';
@@ -36,6 +36,7 @@ import {
 import { createPaidResource, type RequestObservation } from './server.ts';
 import { fetchPaidResource } from './client.ts';
 import { readPreflightPass, PREFLIGHT_MARKER_PATH } from './preflight.ts';
+import { displayKeyPath, loadPayerSigner, PAYER_KEY_PATH } from './payer-key.ts';
 import { buildEvidence, RESOURCE_PATH, RESOURCE_QUERY } from './fixture-e2e.ts';
 import { runEvidenceDir, runEvidenceDisplay, writeEvidence } from './issue-record.ts';
 import { resolveIssuerKey } from './issuer-key.ts';
@@ -43,7 +44,6 @@ import { formatReport, verifyEvidence } from './verify-evidence.ts';
 import type { ObservationSource } from './observe-settlement.ts';
 
 const APP_ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
-const PAYER_KEY_PATH = join(APP_ROOT, '.local', 'keys', 'payer.json');
 
 /** Price of one call, in devnet USDC base units. Small, because it is spent for real on devnet. */
 const PRICE_BASE_UNITS = '10000';
@@ -99,9 +99,15 @@ export async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const { createKeyPairSignerFromBytes } = await import('@solana/kit');
-  const payerBytes = Uint8Array.from(JSON.parse(readFileSync(PAYER_KEY_PATH, 'utf8')) as number[]);
-  const payer = await createKeyPairSignerFromBytes(payerBytes);
+  // Loaded, never created here: a live run uses the funded key the preflight prepared, and a
+  // freshly created one would be unfunded and would fail partway through.
+  const payer = await loadPayerSigner();
+  if (payer === undefined) {
+    console.error(
+      `\nNo payer key at ${displayKeyPath(PAYER_KEY_PATH)}.\n  Run: pnpm demo:devnet:prepare\n`,
+    );
+    process.exit(1);
+  }
 
   const configuredFacilitatorUrl = process.env['PEAC_EXAMPLE_FACILITATOR_URL'];
   const facilitatorClient = new HTTPFacilitatorClient(

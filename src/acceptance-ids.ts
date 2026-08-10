@@ -93,6 +93,11 @@ export const ACCEPTANCE_CASES = {
   'SVM-TAMPER-005': { description: 'a valid record with a missing native artifact fails the presence contract', scope: 'local' },
   'SVM-DET-001': { description: 'the offline end-to-end run produces byte-identical evidence across runs', scope: 'ci-external' },
   'SVM-NET-001': { description: 'the offline end-to-end run passes in a job with networking disabled', scope: 'ci-external' },
+
+  // Key persistence. These run offline: key generation is local computation, not a network call.
+  'KEY-RT-001': { description: 'a payer key is created, persisted and reloaded to the same address', scope: 'local' },
+  'KEY-RT-002': { description: 'a reloaded payer key signs, and the signature verifies under the persisted public key', scope: 'local' },
+  'KEY-RT-003': { description: 'a devnet issuer key is created, persisted and reloaded to the same key pair', scope: 'local' },
 } as const satisfies Record<string, AcceptanceCase>;
 
 export type AcceptanceId = keyof typeof ACCEPTANCE_CASES;
