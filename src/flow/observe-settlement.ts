@@ -6,6 +6,11 @@
  * and verification know nothing about Solana. Everything network-specific is here, which is what
  * makes a second network an additional observer rather than a second evidence model.
  *
+ * TWO OBSERVERS, KEPT APART. The facilitator is a party to the payment, so its account of the
+ * settlement is recorded as its account. A node, when one is asked, is a separate observer, and
+ * what it reported is recorded separately again rather than folded into the first. Neither replaces
+ * the other and neither is promoted to a fact about the network.
+ *
  * WHAT A CHAIN OBSERVATION SAYS. The service records the transaction it was given and the
  * conditions under which it treated the payment as settled. It does not assert that funds moved,
  * that a transaction is final, or that any chain agrees: those are properties of the network, and
@@ -17,6 +22,7 @@ import { computeJsonDocumentDigestJcs } from '@peac/protocol';
 import type { JsonValue } from '@peac/kernel';
 import { coerceDigest, type Sha256Digest } from '../digest.ts';
 import { paymentWasSettled, type LifecycleObservation, type TerminalState } from './lifecycle.ts';
+import type { RpcTransactionObservationV1 } from './observe-transaction.ts';
 
 export const PROFILE_CHAIN_OBSERVATION =
   'org.peacprotocol.examples.payment-evidence/solana-chain-observation/1';
@@ -48,11 +54,17 @@ export interface SolanaChainObservationV1 {
   readonly transactionSignature?: string;
   /** Blockhash the challenge embedded, when the scheme supplied one. */
   readonly recentBlockhash?: string;
-  /** Slot at which the transaction was observed, when a node was asked. */
-  readonly observedSlot?: number;
-  /** Commitment level the observation was made at, when a node was asked. */
-  readonly commitment?: string;
+  /** Who reported the settlement itself: the facilitator, or the in-process fixture. */
   readonly observationSource: ObservationSource;
+  /**
+   * A node's separate account of the same transaction, when one was asked.
+   *
+   * Structurally apart from `observationSource` and never merged into it. Slot and commitment are
+   * things only a node can report, so they exist here and nowhere else: a reader can always tell
+   * which observer supplied which fact. Absent whenever no node was asked, which is every offline
+   * run and any live run that settled nothing.
+   */
+  readonly rpcObservation?: RpcTransactionObservationV1;
   /** Digest of the settlement response exactly as observed. */
   readonly settlementResponseDigest?: Sha256Digest;
   /** Digest of the origin result this payment was for, linking payment to work. */
@@ -79,9 +91,8 @@ export interface NativeSettlementArtifacts {
   readonly observationSource: ObservationSource;
   readonly observedAtUnixSeconds: number;
   readonly assetDecimals: number;
-  /** Slot and commitment, when a node was queried. Absent offline and absent when unasked. */
-  readonly observedSlot?: number;
-  readonly commitment?: string;
+  /** A node's account of the settlement transaction, when one was asked. */
+  readonly rpcObservation?: RpcTransactionObservationV1;
 }
 
 /**
@@ -116,11 +127,12 @@ export function observeSettlement(
       ? { transactionSignature: settleResponse.transaction }
       : {}),
     ...(typeof recentBlockhash === 'string' ? { recentBlockhash } : {}),
-    ...(settled && artifacts.observedSlot !== undefined
-      ? { observedSlot: artifacts.observedSlot }
-      : {}),
-    ...(settled && artifacts.commitment !== undefined ? { commitment: artifacts.commitment } : {}),
     observationSource: artifacts.observationSource,
+    // Carried only alongside a settlement that succeeded and reported a transaction, so a node's
+    // account can never appear beside a payment this run did not observe settling.
+    ...(settled && settleResponse?.transaction && artifacts.rpcObservation !== undefined
+      ? { rpcObservation: artifacts.rpcObservation }
+      : {}),
     ...(artifacts.settlementResponseDigest !== undefined
       ? { settlementResponseDigest: artifacts.settlementResponseDigest }
       : {}),

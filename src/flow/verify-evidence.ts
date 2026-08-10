@@ -258,6 +258,7 @@ export async function verifyEvidence(
     const observation = JSON.parse(new TextDecoder().decode(observationBytes)) as {
       settlementOutcome?: string;
       transactionSignature?: string;
+      rpcObservation?: { transactionSignature?: string; status?: string };
     };
     const settled = observation.settlementOutcome === 'succeeded';
     const hasTransaction = typeof observation.transactionSignature === 'string';
@@ -274,6 +275,32 @@ export async function verifyEvidence(
               : 'a transaction reference is recorded for a settlement that did not succeed',
           ),
     );
+
+    /**
+     * A node's account of the settlement, when one is present.
+     *
+     * Optional by design: an offline run asks nobody, and a live run whose endpoint was unreachable
+     * records an unavailable observation rather than none. What is not optional is that it describe
+     * the same transaction the settlement did. A second observer attached to a different transaction
+     * would read as corroboration of something this run never observed.
+     */
+    const rpc = observation.rpcObservation;
+    if (rpc !== undefined) {
+      const sameTransaction =
+        typeof observation.transactionSignature === 'string' &&
+        rpc.transactionSignature === observation.transactionSignature;
+      checks.push(
+        sameTransaction
+          ? pass(
+              'rpc observation',
+              `${String(rpc.status)}, for the transaction the settlement recorded`,
+            )
+          : fail(
+              'rpc observation',
+              'it describes a transaction the settlement observation does not record',
+            ),
+      );
+    }
   }
 
   return { ok: checks.every((c) => c.ok), checks };

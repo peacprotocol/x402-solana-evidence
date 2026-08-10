@@ -35,6 +35,7 @@ import type { Sha256Digest } from '../digest.ts';
 import * as F from '../../fixtures/deterministic.ts';
 import { resolveIssuerKey, type RunMode } from './issuer-key.ts';
 import { observeSettlement, type ObservationSource } from './observe-settlement.ts';
+import type { RpcTransactionObservationV1 } from './observe-transaction.ts';
 import {
   EXPECTED_EVIDENCE_DIR,
   EXPECTED_EVIDENCE_DISPLAY,
@@ -246,6 +247,13 @@ export interface EvidenceOptions {
   /** Pins the issued-at claim. Offline only: a live run stamps it from the real clock. */
   readonly issuedAtUnixSeconds?: number;
   readonly observationSource: ObservationSource;
+  /**
+   * A node's separate account of the settlement transaction, when one was asked.
+   *
+   * Only a live run supplies it. The offline run contacts nothing, so it has nothing to report and
+   * records nothing rather than reporting an observation it did not make.
+   */
+  readonly rpcObservation?: RpcTransactionObservationV1;
   readonly assetDecimals: number;
   /** Payment identifier the client sent, when the payment-identifier extension was in play. */
   readonly paymentReference?: string;
@@ -381,6 +389,7 @@ export async function buildEvidence(
     ...(serviceResultDigest !== undefined ? { serviceResultDigest } : {}),
     lifecycle: run.origin.lifecycle,
     observationSource: options.observationSource,
+    ...(options.rpcObservation !== undefined ? { rpcObservation: options.rpcObservation } : {}),
     observedAtUnixSeconds: options.observedAtUnixSeconds,
     assetDecimals: options.assetDecimals,
   });

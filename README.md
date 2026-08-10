@@ -176,6 +176,11 @@ it treated a payment as settled. Verification establishes the integrity of that 
 independently establish blockchain consensus, and it does not make the issuer's account of events
 authoritative.
 
+A live run also records what a Solana RPC endpoint reported about the same transaction, as a
+separate observation naming that endpoint, the slot and the commitment level it gave. Two accounts
+are not a consensus claim: the record says who was asked and what they said, and anyone can check
+the transaction reference against the network themselves.
+
 ## Request components
 
 Components follow RFC 9421 derived-component semantics and are taken from the message as the origin
@@ -223,6 +228,7 @@ proxy trust before treating a forwarded scheme or authority as trusted.
 | offline verification from files and a public key | implemented |
 | tamper detection | implemented |
 | settlement observation and chain-observation documents | implemented |
+| independent node observation of the settlement transaction | implemented, live path only; optional and recorded as unavailable when the endpoint cannot answer |
 | live Solana devnet run | manual acceptance step; emits and verifies evidence under `out/`, see the [walkthrough](docs/WALKTHROUGH.md) |
 | scheme `upto` | out of scope |
 | batch settlement | out of scope |

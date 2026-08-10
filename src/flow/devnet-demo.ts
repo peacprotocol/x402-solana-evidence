@@ -57,6 +57,11 @@ import { resolveIssuerKey } from './issuer-key.ts';
 import { SUPPLIED_KEY_CAVEAT, writeIssuerPublicKeyFile } from './public-key-file.ts';
 import { formatReport, verifyEvidence } from './verify-evidence.ts';
 import type { ObservationSource } from './observe-settlement.ts';
+import {
+  observeTransaction,
+  publicEndpointReference,
+  solanaRpcSource,
+} from './observe-transaction.ts';
 
 /** Price of one call, in devnet USDC base units. Small, because it is spent for real on devnet. */
 const PRICE_BASE_UNITS = '10000';
@@ -84,12 +89,7 @@ function facilitatorReference(configured: string | undefined): string {
   if (configured === undefined || configured.trim().length === 0) {
     return 'the upstream default x402 facilitator';
   }
-  try {
-    const url = new URL(configured);
-    return `${url.origin}${url.pathname}`;
-  } catch {
-    return 'the configured x402 facilitator';
-  }
+  return publicEndpointReference(configured) ?? 'the configured x402 facilitator';
 }
 
 /** Directory name for one run: the instant it was observed, in a filesystem-safe form. */
@@ -255,6 +255,26 @@ export async function main(): Promise<void> {
       kind: 'facilitator',
       reference: facilitatorReference(configuredFacilitatorUrl),
     };
+
+    /**
+     * A second observer of the same settlement, asked only once one has happened.
+     *
+     * The facilitator is a party to the payment. Asking a node as well does not make the payment
+     * more true; it records what a separate observer said, kept separate in the document. An
+     * endpoint that is unreachable or does not know the transaction costs this run nothing: the
+     * observation is recorded as unavailable and the evidence is emitted either way.
+     */
+    const settledTransaction = origin.lifecycle.transaction;
+    const rpcObservation =
+      settledTransaction === undefined
+        ? undefined
+        : await observeTransaction({
+            source: solanaRpcSource(process.env['PEAC_EXAMPLE_RPC_URL'] ?? DEVNET_RPC_URL),
+            transactionSignature: settledTransaction,
+            observedAtUnixSeconds,
+          });
+    if (rpcObservation !== undefined) console.log(`  rpc observation     : ${rpcObservation.statement}`);
+
     const paymentReference = extractPaymentIdentifier(result.paymentPayload);
     const layout = await buildEvidence(
       {
@@ -270,6 +290,7 @@ export async function main(): Promise<void> {
         requestBody: new Uint8Array(0),
         observedAtUnixSeconds,
         observationSource,
+        ...(rpcObservation !== undefined ? { rpcObservation } : {}),
         assetDecimals: USDC_DECIMALS,
         ...(paymentReference !== null ? { paymentReference } : {}),
         currency: 'USDC',

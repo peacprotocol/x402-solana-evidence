@@ -97,6 +97,13 @@ export const ACCEPTANCE_CASES = {
   'EVID-CLI-001': { description: 'an evidence directory and a supplied public key verify through the documented arguments', scope: 'local' },
   'EVID-CLI-002': { description: 'a public key that did not sign the record fails at the signature stage', scope: 'local' },
   'EVID-CLI-003': { description: 'a malformed public key file is refused with the file and the reason named', scope: 'local' },
+  /**
+   * Exercised through an injected status source rather than a socket. What is being tested is how
+   * this example records a second observer, not whether a Solana node answers; the endpoint-backed
+   * source is the one line these cases deliberately do not run, and a live run covers it.
+   */
+  'SVM-RPC-001': { description: 'a node status is recorded as a separate observation naming its source', scope: 'local' },
+  'SVM-RPC-002': { description: 'an unavailable node is recorded honestly and does not cost the run its evidence', scope: 'local' },
 
   'SVM-DET-001': { description: 'the offline end-to-end run produces byte-identical evidence across runs', scope: 'ci-external' },
   'SVM-NET-001': { description: 'the offline end-to-end run passes in a job with networking disabled', scope: 'ci-external' },

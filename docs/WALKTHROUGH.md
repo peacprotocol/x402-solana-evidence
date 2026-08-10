@@ -144,6 +144,24 @@ devnet keypair, and the transaction reference is real.
 The run prints the payer address, the recipient, the response status, the payment status, the
 lifecycle it reached and the transaction reference.
 
+### The second observer
+
+Once a payment has settled, the run asks the configured RPC endpoint about the transaction the
+facilitator reported, and records what it said as a separate observation inside
+`chain-observation.json`, naming the endpoint, the slot and the commitment level it reported and
+when it was asked. The facilitator is a party to the payment; a node is not, so the two accounts
+stay structurally apart and neither is promoted into a claim about the network. Slot and commitment
+appear only in the node's observation, because only a node can report them.
+
+The sentence recorded reads "RPC `<endpoint>` reported transaction `<signature>` at slot `<slot>`
+with commitment `<level>` at time `<time>`". It is a report of what an endpoint said. It is not a
+finality claim, and nothing here establishes that funds moved.
+
+An endpoint that is unreachable, slow or does not know the transaction costs the run nothing: the
+observation is recorded as unavailable with the reason, and the evidence is emitted and verified as
+usual. A node observation is therefore optional in a successful run, and when present the verifier
+checks that it describes the same transaction the settlement recorded.
+
 ### What the run writes
 
 It then emits evidence, through the same capture, binding, issuance and verification code the

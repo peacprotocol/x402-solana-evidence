@@ -15,8 +15,20 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beginAcceptanceSuite, recordExecution } from './acceptance-ids.ts';
-import { EXPECTED_EVIDENCE_DIR, EXPECTED_EVIDENCE_DISPLAY } from './flow/issue-record.ts';
+import * as F from '../fixtures/deterministic.ts';
+import { buildEvidence, FIXTURE_EVIDENCE_OPTIONS, runOnce } from './flow/fixture-e2e.ts';
+import {
+  EXPECTED_EVIDENCE_DIR,
+  EXPECTED_EVIDENCE_DISPLAY,
+  writeEvidence,
+} from './flow/issue-record.ts';
 import { resolveIssuerKey } from './flow/issuer-key.ts';
+import { observeSettlement } from './flow/observe-settlement.ts';
+import {
+  observeTransaction,
+  type TransactionStatus,
+  type TransactionStatusSource,
+} from './flow/observe-transaction.ts';
 import {
   InvalidPublicKeyFileError,
   readIssuerPublicKeyFile,
@@ -228,6 +240,213 @@ recordExecution('EVID-CLI-003');
       }
     })(),
   );
+}
+
+// ---------------------------------------------------------------------------------------------
+// A second observer of the same settlement, asked through an injected source.
+// ---------------------------------------------------------------------------------------------
+
+console.log('\nThe node observation, through an injected status source\n');
+
+const TRANSACTION = F.TX_SIGNATURE;
+const OBSERVED_AT = F.FIXED_NOW_UNIX_SECONDS;
+
+/** A source that answers, remembering what it was asked. Opens nothing. */
+function answering(status: TransactionStatus): TransactionStatusSource & { asked: () => string[] } {
+  const asked: string[] = [];
+  return {
+    reference: 'https://api.devnet.example.test/rpc',
+    asked: () => asked,
+    async status(signature) {
+      asked.push(signature);
+      return status;
+    },
+  };
+}
+
+/**
+ * SVM-RPC-001. A node answered, and what it said is recorded as its own observation.
+ *
+ * The point is attribution rather than content: the facilitator's account of the settlement and the
+ * node's account of the transaction stay separate documents inside one chain observation, each
+ * naming who supplied it.
+ */
+recordExecution('SVM-RPC-001');
+{
+  const source = answering({
+    slot: F.OBSERVED_SLOT,
+    commitment: F.COMMITMENT_LEVEL,
+    reportedTransactionError: false,
+  });
+  const observation = await observeTransaction({
+    source,
+    transactionSignature: TRANSACTION,
+    observedAtUnixSeconds: OBSERVED_AT,
+  });
+
+  check('the node was asked about the transaction the settlement reported', source.asked()[0] === TRANSACTION);
+  check(
+    'the observation records the slot and commitment the node reported',
+    observation.status === 'observed' &&
+      observation.observedSlot === F.OBSERVED_SLOT &&
+      observation.commitment === F.COMMITMENT_LEVEL,
+    `${observation.status}, slot ${String(observation.observedSlot)}`,
+  );
+  check(
+    'it names the endpoint that answered, and names it as a node',
+    observation.source.kind === 'rpc' && observation.source.reference === source.reference,
+  );
+  check(
+    'the sentence reports what was said rather than asserting it',
+    observation.statement.startsWith(`RPC ${source.reference} reported transaction ${TRANSACTION}`) &&
+      observation.statement.includes(`at slot ${F.OBSERVED_SLOT}`) &&
+      observation.statement.includes(`with commitment ${F.COMMITMENT_LEVEL}`),
+    observation.statement,
+  );
+  check(
+    'and claims nothing about finality, settlement or funds',
+    !/\bfinal\b|\bfinality\b|\bconfirmed that\b|\bproves\b|\bfunds\b/i.test(observation.statement),
+    observation.statement,
+  );
+
+  // In the document: separate from the facilitator's account, and bound to the same transaction.
+  const settled = observeSettlement({
+    requirements: F.PAYMENT_REQUIREMENTS,
+    paymentPayload: F.PAYMENT_PAYLOAD,
+    settleResponse: F.SETTLEMENT_RESPONSE,
+    lifecycle: { states: [], terminalState: 'response_write_attempted' },
+    observationSource: { kind: 'facilitator', reference: 'https://facilitator.example.test/' },
+    rpcObservation: observation,
+    observedAtUnixSeconds: OBSERVED_AT,
+    assetDecimals: F.TOKEN_DECIMALS,
+  });
+  check(
+    'the chain observation carries both accounts, kept apart',
+    settled.observationSource.kind === 'facilitator' &&
+      settled.rpcObservation?.source.kind === 'rpc' &&
+      settled.rpcObservation.transactionSignature === settled.transactionSignature,
+    `${settled.observationSource.kind}, ${String(settled.rpcObservation?.source.kind)}`,
+  );
+
+  // A run that settled nothing has no transaction, so a node's account cannot be attached to it.
+  const notSettled = observeSettlement({
+    requirements: F.PAYMENT_REQUIREMENTS,
+    paymentPayload: F.PAYMENT_PAYLOAD,
+    lifecycle: { states: [], terminalState: 'verification_rejected' },
+    observationSource: { kind: 'facilitator', reference: 'https://facilitator.example.test/' },
+    rpcObservation: observation,
+    observedAtUnixSeconds: OBSERVED_AT,
+    assetDecimals: F.TOKEN_DECIMALS,
+  });
+  check(
+    'a refused settlement carries no node observation, because it has no transaction',
+    notSettled.rpcObservation === undefined && notSettled.transactionSignature === undefined,
+  );
+}
+
+/**
+ * SVM-RPC-002. The node could not answer.
+ *
+ * Recorded as an observation that could not be made, with a reason from a fixed vocabulary rather
+ * than from whatever the endpoint returned. The settlement already happened and the facilitator's
+ * account of it is recorded either way, so this must not cost the run its evidence.
+ */
+recordExecution('SVM-RPC-002');
+{
+  const unreachable: TransactionStatusSource = {
+    reference: 'https://api.devnet.example.test/rpc',
+    status: () => Promise.reject(new Error('connect ECONNREFUSED 203.0.113.7:443 <server text>')),
+  };
+  const silent: TransactionStatusSource = {
+    reference: 'https://api.devnet.example.test/rpc',
+    status: () => Promise.resolve(undefined),
+  };
+
+  const failedCall = await observeTransaction({
+    source: unreachable,
+    transactionSignature: TRANSACTION,
+    observedAtUnixSeconds: OBSERVED_AT,
+  });
+  const noStatus = await observeTransaction({
+    source: silent,
+    transactionSignature: TRANSACTION,
+    observedAtUnixSeconds: OBSERVED_AT,
+  });
+
+  check(
+    'an endpoint that could not be reached is recorded as unavailable, not as absent',
+    failedCall.status === 'unavailable' && (failedCall.unavailableReason ?? '').length > 0,
+    String(failedCall.unavailableReason),
+  );
+  check(
+    'an endpoint that knows no status for the transaction is recorded as such',
+    noStatus.status === 'unavailable' && noStatus.unavailableReason !== failedCall.unavailableReason,
+    `${String(noStatus.unavailableReason)}`,
+  );
+  check(
+    'neither records a slot or a commitment it was never given',
+    failedCall.observedSlot === undefined &&
+      failedCall.commitment === undefined &&
+      noStatus.observedSlot === undefined,
+  );
+  check(
+    'the reason retains no text the endpoint supplied',
+    !failedCall.unavailableReason!.includes('server text') &&
+      !failedCall.unavailableReason!.includes('203.0.113.7'),
+    failedCall.unavailableReason!,
+  );
+  check(
+    'the sentence still says who was asked and what came back',
+    failedCall.statement.startsWith(`RPC ${unreachable.reference} did not report a status`) &&
+      failedCall.statement.includes(TRANSACTION),
+    failedCall.statement,
+  );
+
+  // The evidence is still emitted, and still verifies, with the unavailable observation in it.
+  const run = await runOnce();
+  const layout = await buildEvidence(run, { ...FIXTURE_EVIDENCE_OPTIONS, rpcObservation: failedCall });
+  const directory = mkdtempSync(join(tmpdir(), 'peac-evidence-rpc-'));
+  writeEvidence(directory, layout);
+  const report = await verifyEvidence(directory, fixtureKey.publicKey);
+  check(
+    'evidence carrying an unavailable node observation still verifies',
+    report.ok,
+    failedChecks(report).join(', ') || 'nothing failed',
+  );
+  check(
+    'and the verifier reports the node observation as its own check',
+    report.checks.some((c) => c.name === 'rpc observation' && c.ok),
+    report.checks.map((c) => c.name).join(', '),
+  );
+
+  // A node observation naming a different transaction is inconsistent evidence, and is refused.
+  const observationDocument = JSON.parse(
+    new TextDecoder().decode(layout.files.get('chain-observation.json')),
+  ) as Record<string, unknown>;
+  const mismatched = new Map(layout.files).set(
+    'chain-observation.json',
+    new TextEncoder().encode(
+      `${JSON.stringify(
+        {
+          ...observationDocument,
+          rpcObservation: { ...failedCall, transactionSignature: 'AnotherTransaction11111111' },
+        },
+        null,
+        2,
+      )}\n`,
+    ),
+  );
+  const tamperedDirectory = mkdtempSync(join(tmpdir(), 'peac-evidence-rpc-'));
+  writeEvidence(tamperedDirectory, { jws: layout.jws, files: mismatched });
+  const tamperedReport = await verifyEvidence(tamperedDirectory, fixtureKey.publicKey);
+  check(
+    'a node observation naming another transaction is refused as inconsistent',
+    tamperedReport.checks.some((c) => c.name === 'rpc observation' && !c.ok),
+    tamperedReport.checks.filter((c) => !c.ok).map((c) => c.name).join(', ') || 'nothing failed',
+  );
+
+  rmSync(directory, { recursive: true, force: true });
+  rmSync(tamperedDirectory, { recursive: true, force: true });
 }
 
 rmSync(workspace, { recursive: true, force: true });
