@@ -12,6 +12,8 @@
  */
 import { generateKeypair } from '@peac/crypto';
 import {
+  chmodSync,
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -606,6 +608,156 @@ function emittedText(directory: string): string {
     'a label that is not plainly safe is refused rather than reshaped',
     publicEndpointReference(undefined, 'https://rpc.example.test/v1/TOKEN?k=1') === undefined,
   );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Verification against a directory built to break it.
+// ---------------------------------------------------------------------------------------------
+
+console.log('\nVerification against a directory built to break it\n');
+
+/** A private copy of the committed evidence, so a case can damage it without damaging the fixture. */
+function hostileCopy(): string {
+  const directory = mkdtempSync(join(tmpdir(), 'peac-evidence-hostile-'));
+  cpSync(EXPECTED_EVIDENCE_DIR, directory, { recursive: true });
+  return directory;
+}
+
+/**
+ * Verify a directory and report what came back, treating a throw as the failure it would be.
+ *
+ * The whole point of these cases is that verification returns a verdict, so a thrown exception is
+ * captured and reported rather than allowed to end the suite: that would hide the failure behind a
+ * crash, which is exactly the behaviour being tested against.
+ */
+async function verdictFor(
+  directory: string,
+): Promise<{ readonly report?: EvidenceVerificationReport; readonly thrown?: string }> {
+  try {
+    return { report: await verifyEvidence(directory, fixtureKey.publicKey) };
+  } catch (e) {
+    return { thrown: `${(e as Error).constructor.name}: ${(e as Error).message}` };
+  }
+}
+
+/** One damaged-file case: the report must exist, must fail, and must name the expected checks. */
+async function hostileCase(input: {
+  readonly label: string;
+  readonly damage: (directory: string) => void;
+  readonly expectFailing: readonly string[];
+}): Promise<void> {
+  const directory = hostileCopy();
+  input.damage(directory);
+  const verdict = await verdictFor(directory);
+
+  check(`${input.label}: verification returns a verdict rather than throwing`, verdict.thrown === undefined, verdict.thrown ?? '');
+  check(`${input.label}: the verdict is a failure`, verdict.report?.ok === false);
+  for (const name of input.expectFailing) {
+    check(
+      `${input.label}: the failure is reported as "${name}"`,
+      verdict.report?.checks.some((c) => c.name === name && !c.ok) === true,
+      (verdict.report?.checks ?? []).filter((c) => !c.ok).map((c) => c.name).join(', ') || 'nothing failed',
+    );
+  }
+  rmSync(directory, { recursive: true, force: true });
+}
+
+recordExecution('HOSTILE-EV-001');
+await hostileCase({
+  label: 'a malformed request binding',
+  damage: (d) => writeFileSync(join(d, 'request-binding.json'), '{"components": '),
+  expectFailing: ['request binding digest'],
+});
+
+recordExecution('HOSTILE-EV-002');
+await hostileCase({
+  label: 'a malformed origin result binding',
+  damage: (d) => writeFileSync(join(d, 'origin-result-binding.json'), 'not json at all'),
+  expectFailing: ['origin result binding digest', 'origin result body'],
+});
+
+recordExecution('HOSTILE-EV-003');
+await hostileCase({
+  label: 'a malformed chain observation',
+  damage: (d) => writeFileSync(join(d, 'chain-observation.json'), '{"settlementOutcome":'),
+  expectFailing: ['chain observation digest', 'chain observation'],
+});
+
+recordExecution('HOSTILE-EV-004');
+await hostileCase({
+  label: 'a chain observation that is an array',
+  damage: (d) => writeFileSync(join(d, 'chain-observation.json'), '[]'),
+  expectFailing: ['chain observation digest', 'chain observation'],
+});
+await hostileCase({
+  label: 'a result binding that is an array',
+  damage: (d) => writeFileSync(join(d, 'origin-result-binding.json'), '[1,2,3]'),
+  expectFailing: ['origin result binding digest', 'origin result body'],
+});
+
+/**
+ * HOSTILE-EV-005. An artifact that is there but cannot be read.
+ *
+ * The failure mode this guards against is silent: read it, catch everything, call it missing, and
+ * a directory whose files are unreadable verifies as a smaller and perfectly consistent one. Two
+ * shapes are attempted, because not every platform expresses the first.
+ */
+recordExecution('HOSTILE-EV-005');
+{
+  const unreadableName = 'every artifact is readable';
+
+  // A path that is a directory. Expressible everywhere, and never mistaken for absence.
+  {
+    const directory = hostileCopy();
+    rmSync(join(directory, 'chain-observation.json'));
+    mkdirSync(join(directory, 'chain-observation.json'));
+    const verdict = await verdictFor(directory);
+    check('an artifact replaced by a directory returns a verdict', verdict.thrown === undefined, verdict.thrown ?? '');
+    check('and the verdict is a failure', verdict.report?.ok === false);
+    check(
+      'and it says the artifact could not be read, not that it is missing',
+      verdict.report?.checks.some((c) => c.name === unreadableName && !c.ok) === true,
+      (verdict.report?.checks ?? []).map((c) => c.name).join(', '),
+    );
+    rmSync(directory, { recursive: true, force: true });
+  }
+
+  // Permissions. Attempted rather than assumed: a platform or a privileged user may not express it.
+  {
+    const directory = hostileCopy();
+    const target = join(directory, 'chain-observation.json');
+    let expressible = false;
+    try {
+      chmodSync(target, 0o000);
+      readFileSync(target);
+    } catch {
+      expressible = true;
+    }
+    if (!expressible) {
+      console.log('  note  file permissions do not deny this process a read here; case not expressible');
+    } else {
+      const verdict = await verdictFor(directory);
+      check('an artifact this process may not open returns a verdict', verdict.thrown === undefined, verdict.thrown ?? '');
+      check('and it is reported as unreadable rather than missing', verdict.report?.checks.some((c) => c.name === unreadableName && !c.ok) === true);
+    }
+    chmodSync(target, 0o600);
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+/** A record that is not a record at all. Refused at the signature stage, never thrown. */
+{
+  const directory = hostileCopy();
+  writeFileSync(join(directory, 'record.jws'), 'this is not a compact JWS\n');
+  const verdict = await verdictFor(directory);
+  check('a record that is arbitrary bytes returns a verdict', verdict.thrown === undefined, verdict.thrown ?? '');
+  check(
+    'and it is refused at the signature stage',
+    verdict.report?.ok === false &&
+      verdict.report.checks.some((c) => c.name === 'record signature and schema' && !c.ok),
+    (verdict.report?.checks ?? []).map((c) => c.name).join(', '),
+  );
+  rmSync(directory, { recursive: true, force: true });
 }
 
 // ---------------------------------------------------------------------------------------------

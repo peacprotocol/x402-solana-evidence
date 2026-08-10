@@ -116,6 +116,18 @@ export const ACCEPTANCE_CASES = {
   'RED-URL-003': { description: 'an API key carried in an endpoint query never reaches the evidence', scope: 'local' },
   'RED-URL-004': { description: 'an endpoint fragment never reaches the evidence', scope: 'local' },
 
+  /**
+   * Verification against a directory built to break it.
+   *
+   * A verifier handed hostile files must produce a verdict, not a stack trace: a reader who cannot
+   * tell "this evidence is bad" from "the verifier fell over" has learned nothing.
+   */
+  'HOSTILE-EV-001': { description: 'a malformed request binding is reported as a failure, not thrown', scope: 'local' },
+  'HOSTILE-EV-002': { description: 'a malformed origin result binding is reported as a failure, not thrown', scope: 'local' },
+  'HOSTILE-EV-003': { description: 'a malformed chain observation is reported as a failure, not thrown', scope: 'local' },
+  'HOSTILE-EV-004': { description: 'a sidecar of the wrong JSON type is reported as a failure, not thrown', scope: 'local' },
+  'HOSTILE-EV-005': { description: 'an artifact that exists but cannot be read fails, and is never read as absent', scope: 'local' },
+
   'EVID-TX-001': { description: 'an interrupted emission leaves no final evidence directory', scope: 'local' },
   'EVID-TX-002': { description: 'an existing evidence directory is never overwritten or written into', scope: 'local' },
 

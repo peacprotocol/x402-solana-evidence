@@ -55,12 +55,57 @@ export interface EvidenceVerificationReport {
 const pass = (name: string, detail = ''): VerificationCheck => ({ name, ok: true, detail });
 const fail = (name: string, detail: string): VerificationCheck => ({ name, ok: false, detail });
 
-function readIfPresent(directory: string, artifact: EvidenceArtifact): Uint8Array | undefined {
+/**
+ * What reading one artifact produced.
+ *
+ * Three outcomes, not two, and the third is the point. "Absent" is a fact about the evidence and
+ * feeds the presence contract; "unreadable" is a fact about this machine and must never be
+ * reported as absence, because a directory whose files cannot be read would otherwise verify as a
+ * smaller, consistent one.
+ */
+type ArtifactRead =
+  | { readonly kind: 'present'; readonly bytes: Uint8Array }
+  | { readonly kind: 'absent' }
+  | { readonly kind: 'unreadable'; readonly reason: string };
+
+/**
+ * Read one artifact, without deciding anything about what its state means.
+ *
+ * Only `ENOENT` is absence. Every other error, including a path that is a directory or one this
+ * process may not open, is reported as unreadable: the caller cannot tell those apart from a
+ * missing file by looking at the directory, so this refuses to guess on its behalf.
+ */
+function readArtifact(directory: string, artifact: EvidenceArtifact): ArtifactRead {
   try {
-    return new Uint8Array(readFileSync(join(directory, artifact)));
-  } catch {
-    return undefined;
+    return { kind: 'present', bytes: new Uint8Array(readFileSync(join(directory, artifact))) };
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') return { kind: 'absent' };
+    return { kind: 'unreadable', reason: code ?? 'unreadable' };
   }
+}
+
+/** What parsing one JSON sidecar produced. Malformed is a result, never an exception. */
+type JsonRead =
+  | { readonly kind: 'parsed'; readonly value: unknown }
+  | { readonly kind: 'malformed' }
+  | { readonly kind: 'absent' };
+
+/** A JSON object, as opposed to an array, a null, or a bare scalar wearing the same file name. */
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * A bounded rendering of a value read out of a document.
+ *
+ * Report text is the one place attacker-controlled content could reach a reader's terminal at
+ * whatever length it likes, so a value taken from a file is described rather than reproduced.
+ */
+function describeBound(value: unknown): string {
+  if (typeof value === 'string') return value.length <= 80 ? value : `${value.slice(0, 80)}...`;
+  if (typeof value === 'object' && value !== null) return 'a value that is not a string';
+  return String(value).slice(0, 80);
 }
 
 function isTerminalState(value: unknown): value is TerminalState {
@@ -79,11 +124,52 @@ export async function verifyEvidence(
 ): Promise<EvidenceVerificationReport> {
   const checks: VerificationCheck[] = [];
 
+  // Read every artifact once, before anything is decided. A file that exists but cannot be read is
+  // reported as exactly that and stops the run: treating it as absent would let an unreadable
+  // directory verify as a smaller, self-consistent one.
   const present = new Map<EvidenceArtifact, Uint8Array>();
+  const unreadable: string[] = [];
   for (const artifact of EVIDENCE_ARTIFACTS) {
-    const bytes = readIfPresent(directory, artifact);
-    if (bytes !== undefined) present.set(artifact, bytes);
+    const read = readArtifact(directory, artifact);
+    if (read.kind === 'present') present.set(artifact, read.bytes);
+    else if (read.kind === 'unreadable') unreadable.push(`${artifact} (${read.reason})`);
   }
+  if (unreadable.length > 0) {
+    return {
+      ok: false,
+      checks: [
+        fail(
+          'every artifact is readable',
+          `could not be read, and absence must not be assumed: ${unreadable.join('; ')}`,
+        ),
+      ],
+    };
+  }
+
+  /**
+   * Parse one JSON sidecar, once.
+   *
+   * Every reader of a sidecar goes through here and reuses the parsed value, so a document cannot
+   * be parsed safely in one place and unsafely in another, and a malformed file produces a result
+   * rather than an exception out of the middle of verification.
+   */
+  const parsedJson = new Map<EvidenceArtifact, JsonRead>();
+  const readJsonArtifact = (artifact: EvidenceArtifact): JsonRead => {
+    const cached = parsedJson.get(artifact);
+    if (cached !== undefined) return cached;
+    const bytes = present.get(artifact);
+    let read: JsonRead;
+    if (bytes === undefined) read = { kind: 'absent' };
+    else {
+      try {
+        read = { kind: 'parsed', value: JSON.parse(new TextDecoder().decode(bytes)) };
+      } catch {
+        read = { kind: 'malformed' };
+      }
+    }
+    parsedJson.set(artifact, read);
+    return read;
+  };
 
   const recordBytes = present.get('record.jws');
   if (recordBytes === undefined) {
@@ -91,7 +177,17 @@ export async function verifyEvidence(
   }
   const jws = new TextDecoder().decode(recordBytes).trim();
 
-  const verified = await verifyLocal(jws, publicKey);
+  // The record is attacker-controlled bytes like everything else here, so a refusal from the
+  // verification primitive is a result and a throw from it is still a verification failure.
+  let verified: Awaited<ReturnType<typeof verifyLocal>>;
+  try {
+    verified = await verifyLocal(jws, publicKey);
+  } catch {
+    return {
+      ok: false,
+      checks: [fail('record signature and schema', 'the record could not be read as a PEAC record')],
+    };
+  }
   if (!verified.valid) {
     return {
       ok: false,
@@ -137,18 +233,16 @@ export async function verifyEvidence(
       checks.push(fail(name, `the record binds a digest but ${artifact} is missing`));
       return;
     }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(new TextDecoder().decode(bytes));
-    } catch {
+    const parsed = readJsonArtifact(artifact);
+    if (parsed.kind !== 'parsed') {
       checks.push(fail(name, `${artifact} is not readable as JSON`));
       return;
     }
-    const recomputed = coerceDigest(await computeJsonDocumentDigestJcs(parsed as JsonValue));
+    const recomputed = coerceDigest(await computeJsonDocumentDigestJcs(parsed.value as JsonValue));
     checks.push(
       recomputed === claimed
         ? pass(name, recomputed)
-        : fail(name, `recomputed ${recomputed}, record binds ${String(claimed)}`),
+        : fail(name, `recomputed ${recomputed}, record binds ${describeBound(claimed)}`),
     );
   };
 
@@ -187,7 +281,7 @@ export async function verifyEvidence(
     checks.push(
       recomputed === claimed
         ? pass(name, recomputed)
-        : fail(name, `recomputed ${recomputed}, record binds ${String(claimed)}`),
+        : fail(name, `recomputed ${recomputed}, record binds ${describeBound(claimed)}`),
     );
   };
 
@@ -209,25 +303,25 @@ export async function verifyEvidence(
 
   // The result binding names the body by digest, so the body is checked against the binding rather
   // than against the record: that is where the claim about the bytes actually lives.
-  const resultBindingBytes = present.get('origin-result-binding.json');
+  const resultBinding = readJsonArtifact('origin-result-binding.json');
   const bodyBytes = present.get('origin-result-body.bin');
-  if (resultBindingBytes !== undefined) {
-    let boundBodyDigest: unknown;
-    try {
-      boundBodyDigest = (JSON.parse(new TextDecoder().decode(resultBindingBytes)) as {
-        bodyDigest?: unknown;
-      }).bodyDigest;
-    } catch {
-      boundBodyDigest = undefined;
-    }
-    if (bodyBytes === undefined) {
+  if (resultBinding.kind !== 'absent') {
+    if (resultBinding.kind === 'malformed') {
+      checks.push(fail('origin result body', 'the result binding is not readable as JSON'));
+    } else if (!isJsonObject(resultBinding.value)) {
+      checks.push(fail('origin result body', 'the result binding is not a JSON object'));
+    } else if (bodyBytes === undefined) {
       checks.push(fail('origin result body', 'the result binding exists but the body is missing'));
     } else {
+      const boundBodyDigest = resultBinding.value['bodyDigest'];
       const recomputed: Sha256Digest = digestBytes(bodyBytes);
       checks.push(
         recomputed === boundBodyDigest
           ? pass('origin result body', recomputed)
-          : fail('origin result body', `recomputed ${recomputed}, binding names ${String(boundBodyDigest)}`),
+          : fail(
+              'origin result body',
+              `recomputed ${recomputed}, binding names ${describeBound(boundBodyDigest)}`,
+            ),
       );
     }
   }
@@ -253,9 +347,13 @@ export async function verifyEvidence(
 
   // A refused or unreached settlement must carry no transaction facts, because a transaction
   // reference beside a failure reads as a payment that happened.
-  const observationBytes = present.get('chain-observation.json');
-  if (observationBytes !== undefined) {
-    const observation = JSON.parse(new TextDecoder().decode(observationBytes)) as {
+  const observationRead = readJsonArtifact('chain-observation.json');
+  if (observationRead.kind === 'malformed') {
+    checks.push(fail('chain observation', 'chain-observation.json is not readable as JSON'));
+  } else if (observationRead.kind === 'parsed' && !isJsonObject(observationRead.value)) {
+    checks.push(fail('chain observation', 'chain-observation.json is not a JSON object'));
+  } else if (observationRead.kind === 'parsed') {
+    const observation = observationRead.value as {
       settlementOutcome?: string;
       transactionSignature?: string;
       rpcObservation?: { transactionSignature?: string; status?: string };
@@ -293,7 +391,7 @@ export async function verifyEvidence(
         sameTransaction
           ? pass(
               'rpc observation',
-              `${String(rpc.status)}, for the transaction the settlement recorded`,
+              `${describeBound(rpc.status)}, for the transaction the settlement recorded`,
             )
           : fail(
               'rpc observation',
