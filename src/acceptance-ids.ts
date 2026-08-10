@@ -116,6 +116,15 @@ export const ACCEPTANCE_CASES = {
   'SVM-RPC-001': { description: 'a node status is recorded as a separate observation naming its source', scope: 'local' },
   'SVM-RPC-002': { description: 'an unavailable node is recorded honestly and does not cost the run its evidence', scope: 'local' },
   /**
+   * Two observers of one transaction, disagreeing.
+   *
+   * The property is that the disagreement is reported and not resolved: integrity still passes,
+   * the signature is still valid, and neither account is promoted to a fact about the network.
+   */
+  'OBS-AGREE-001': { description: 'two observers reporting the same outcome raise no warning', scope: 'local' },
+  'OBS-AGREE-002': { description: 'facilitator success against a node-reported transaction error is warned about, and still verifies', scope: 'local' },
+  'OBS-AGREE-003': { description: 'an unavailable node observation is informational and corroborates nothing', scope: 'local' },
+  /**
    * Endpoint references, against URLs built to leak.
    *
    * Each case drives the real derivation used by the live run and then string-scans everything the

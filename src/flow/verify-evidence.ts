@@ -18,6 +18,12 @@
  * verifier, and the documents match what the record says about them. It does not establish that
  * the key belongs to any particular organization, that the payment settled, or that any statement
  * inside the documents is true. Those are separate questions, and this reports on none of them.
+ *
+ * WARNINGS, WHICH ARE NOT VERDICTS. Some things are worth telling a reader without being a finding
+ * about the contents: two observers of the same transaction reporting different things is the case
+ * that exists today. Those are collected separately from the checks and never affect the outcome,
+ * because reconciling observers would mean choosing which one to believe, and nothing here is in a
+ * position to do that.
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -49,9 +55,25 @@ export interface VerificationCheck {
   readonly detail: string;
 }
 
+/**
+ * Something a reader should be told that is not a verdict on the contents.
+ *
+ * Kept in its own collection rather than as a third value of `ok`, so that a warning structurally
+ * cannot decide whether a directory verified. Integrity is a question about bytes and a key; two
+ * observers saying different things is a question about the world, and answering the second one
+ * here would mean this verifier deciding which observer to believe.
+ */
+export interface VerificationWarning {
+  readonly name: string;
+  /** Bounded explanation. Never quotes attacker-controlled document text. */
+  readonly detail: string;
+}
+
 export interface EvidenceVerificationReport {
   readonly ok: boolean;
   readonly checks: readonly VerificationCheck[];
+  /** Never affects `ok`. See `VerificationWarning`. */
+  readonly warnings: readonly VerificationWarning[];
 }
 
 const pass = (name: string, detail = ''): VerificationCheck => ({ name, ok: true, detail });
@@ -141,6 +163,7 @@ export async function verifyEvidence(
   suppliedKey?: SuppliedKeyMetadata,
 ): Promise<EvidenceVerificationReport> {
   const checks: VerificationCheck[] = [];
+  const warnings: VerificationWarning[] = [];
 
   // Read every artifact once, before anything is decided. A file that exists but cannot be read is
   // reported as exactly that and stops the run: treating it as absent would let an unreadable
@@ -161,6 +184,7 @@ export async function verifyEvidence(
           `could not be read, and absence must not be assumed: ${unreadable.join('; ')}`,
         ),
       ],
+      warnings,
     };
   }
 
@@ -191,7 +215,7 @@ export async function verifyEvidence(
 
   const recordBytes = present.get('record.jws');
   if (recordBytes === undefined) {
-    return { ok: false, checks: [fail('record present', 'record.jws is missing')] };
+    return { ok: false, checks: [fail('record present', 'record.jws is missing')], warnings };
   }
   const jws = new TextDecoder().decode(recordBytes).trim();
 
@@ -204,12 +228,14 @@ export async function verifyEvidence(
     return {
       ok: false,
       checks: [fail('record signature and schema', 'the record could not be read as a PEAC record')],
+      warnings,
     };
   }
   if (!verified.valid) {
     return {
       ok: false,
       checks: [fail('record signature and schema', `${verified.code}`)],
+      warnings,
     };
   }
   checks.push(pass('record signature and schema', `verified under kid ${verified.kid}`));
@@ -268,7 +294,7 @@ export async function verifyEvidence(
   const evidence = claims.extensions?.[PAYMENT_EVIDENCE_GROUP];
   if (commerce === undefined || evidence === undefined) {
     checks.push(fail('extension groups', 'the record is missing a required extension group'));
-    return { ok: false, checks };
+    return { ok: false, checks, warnings };
   }
   checks.push(pass('extension groups', `${COMMERCE_GROUP}, ${PAYMENT_EVIDENCE_GROUP}`));
 
@@ -389,7 +415,7 @@ export async function verifyEvidence(
   const terminalState = evidence['terminal_state'];
   if (!isTerminalState(terminalState)) {
     checks.push(fail('terminal state', 'the record carries no recognised terminal state'));
-    return { ok: false, checks };
+    return { ok: false, checks, warnings };
   }
   const violations = checkPresence(terminalState, new Set(present.keys()));
   checks.push(
@@ -414,7 +440,11 @@ export async function verifyEvidence(
     const observation = observationRead.value as {
       settlementOutcome?: string;
       transactionSignature?: string;
-      rpcObservation?: { transactionSignature?: string; status?: string };
+      rpcObservation?: {
+        transactionSignature?: string;
+        status?: string;
+        reportedTransactionError?: unknown;
+      };
     };
     const settled = observation.settlementOutcome === 'succeeded';
     const hasTransaction = typeof observation.transactionSignature === 'string';
@@ -445,21 +475,44 @@ export async function verifyEvidence(
       const sameTransaction =
         typeof observation.transactionSignature === 'string' &&
         rpc.transactionSignature === observation.transactionSignature;
+      const nodeReportedError = rpc.status === 'observed' && rpc.reportedTransactionError === true;
       checks.push(
         sameTransaction
           ? pass(
               'rpc observation',
-              `${describeBound(rpc.status)}, for the transaction the settlement recorded`,
+              rpc.status === 'unavailable'
+                ? 'unavailable: the node reported no status for this transaction'
+                : `${describeBound(rpc.status)}, for the transaction the settlement recorded` +
+                  `${nodeReportedError ? ', and reported it with an execution error' : ''}`,
             )
           : fail(
               'rpc observation',
               'it describes a transaction the settlement observation does not record',
             ),
       );
+
+      /**
+       * Two observers of the same transaction, saying different things.
+       *
+       * Reported and never resolved. The facilitator is a party to the payment and the node is a
+       * separate observer, so deciding which of them was right would mean this verifier promoting
+       * one account to a fact about the network, which it is in no position to do. Nor is it a
+       * signature failure: the record says exactly what each observer said, and it says it
+       * intact. So the disagreement is surfaced where a reader will see it, and left there.
+       */
+      if (sameTransaction && settled && nodeReportedError) {
+        warnings.push({
+          name: 'observer disagreement',
+          detail:
+            'the facilitator reported settlement success; the node reported the transaction ' +
+            'with an execution error. These are separate attributed observations and have not ' +
+            'been reconciled here.',
+        });
+      }
     }
   }
 
-  return { ok: checks.every((c) => c.ok), checks };
+  return { ok: checks.every((c) => c.ok), checks, warnings };
 }
 
 /** A command line this verifier cannot act on. Never raised for evidence that simply fails. */
@@ -583,11 +636,20 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   await main();
 }
 
-/** Render a report. The text is not bound by anything; it is a reading of the files. */
+/**
+ * Render a report. The text is not bound by anything; it is a reading of the files.
+ *
+ * Warnings print under their own marker, after the checks and before the verdict, so a reader can
+ * tell at a glance that something is being reported rather than decided. A report with no warnings
+ * prints exactly as it did before they existed.
+ */
 export function formatReport(directory: string, report: EvidenceVerificationReport): string {
   const lines = ['', `Evidence verification: ${directory}`, ''];
   for (const check of report.checks) {
     lines.push(`  ${check.ok ? 'ok  ' : 'FAIL'}  ${check.name}${check.detail ? `: ${check.detail}` : ''}`);
+  }
+  for (const warning of report.warnings) {
+    lines.push(`  warn  ${warning.name}: ${warning.detail}`);
   }
   lines.push('');
   lines.push(
@@ -595,6 +657,9 @@ export function formatReport(directory: string, report: EvidenceVerificationRepo
       ? 'Verified. Contents are intact relative to the supplied key, and every bound digest recomputes.'
       : 'Not verified. See the failures above.',
   );
+  if (report.warnings.length > 0) {
+    lines.push('Warnings report what the observers said. They are not part of this verdict.');
+  }
   lines.push('');
   return lines.join('\n');
 }

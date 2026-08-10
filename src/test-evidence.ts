@@ -61,6 +61,7 @@ import {
   type LoadedIssuerPublicKey,
 } from './flow/public-key-file.ts';
 import {
+  formatReport,
   parseVerifyArguments,
   UsageError,
   verifyEvidence,
@@ -559,6 +560,133 @@ recordExecution('SVM-RPC-002');
 
   rmSync(directory, { recursive: true, force: true });
   rmSync(tamperedDirectory, { recursive: true, force: true });
+}
+
+// ---------------------------------------------------------------------------------------------
+// Two observers of the same transaction, saying different things.
+// ---------------------------------------------------------------------------------------------
+
+console.log('\nTwo observers of the same transaction\n');
+
+/**
+ * Build a real evidence directory carrying one node observation, and verify it.
+ *
+ * The observation is produced by the same function the live run uses, through an injected status
+ * source, and then written into evidence the same way: what is being exercised is the verifier
+ * reading a signed document, not a hand-written fixture that happens to have the right fields.
+ */
+async function verifiedWithObservation(
+  status: TransactionStatus | 'unavailable',
+): Promise<{ readonly report: EvidenceVerificationReport; readonly rendered: string }> {
+  const source: TransactionStatusSource = {
+    reference: 'https://api.devnet.example.test/rpc',
+    status: () => Promise.resolve(status === 'unavailable' ? undefined : status),
+  };
+  const run = await runOnce();
+  const observation = await observeTransaction({
+    source,
+    transactionSignature: run.origin.lifecycle.transaction ?? TRANSACTION,
+    observedAtUnixSeconds: OBSERVED_AT,
+  });
+  const layout = await buildEvidence(run, {
+    ...FIXTURE_EVIDENCE_OPTIONS,
+    rpcObservation: observation,
+  });
+  const directory = mkdtempSync(join(tmpdir(), 'peac-evidence-agree-'));
+  writeEvidence(directory, layout);
+  const report = await verifyEvidence(directory, fixtureKey.publicKey);
+  rmSync(directory, { recursive: true, force: true });
+  return { report, rendered: formatReport('evidence', report) };
+}
+
+/**
+ * OBS-AGREE-001. Both observers reported the same thing, so there is nothing to report.
+ *
+ * Stated as its own case because a warning that fires on agreement is worse than no warning: it
+ * would train a reader to ignore the one that matters.
+ */
+recordExecution('OBS-AGREE-001');
+{
+  const { report, rendered } = await verifiedWithObservation({
+    slot: F.OBSERVED_SLOT,
+    commitment: F.COMMITMENT_LEVEL,
+    reportedTransactionError: false,
+  });
+  check('agreeing observers verify', report.ok, failedChecks(report).join(', ') || 'nothing failed');
+  check('and raise no warning', report.warnings.length === 0, report.warnings.map((w) => w.name).join(', '));
+  check('and the printed report shows no warning line', !rendered.includes('warn  '), rendered);
+}
+
+/**
+ * OBS-AGREE-002. The facilitator reported success and the node reported an execution error.
+ *
+ * The record is intact and says exactly what each observer said, so the signature is valid and the
+ * digests recompute: failing here would be reporting a cryptographic problem that does not exist.
+ * What the reader gets is the disagreement, unreconciled, and a verdict that still stands.
+ */
+recordExecution('OBS-AGREE-002');
+{
+  const { report, rendered } = await verifiedWithObservation({
+    slot: F.OBSERVED_SLOT,
+    commitment: F.COMMITMENT_LEVEL,
+    reportedTransactionError: true,
+  });
+
+  check(
+    'the disagreement is reported as a warning',
+    report.warnings.some((w) => w.name === 'observer disagreement'),
+    report.warnings.map((w) => w.name).join(', ') || 'no warning',
+  );
+  check(
+    'the warning names both accounts without deciding between them',
+    report.warnings.some(
+      (w) =>
+        w.detail.includes('the facilitator reported settlement success') &&
+        w.detail.includes('execution error') &&
+        w.detail.includes('have not been reconciled'),
+    ),
+    report.warnings.map((w) => w.detail).join(' | '),
+  );
+  check(
+    'integrity still passes: the evidence verifies',
+    report.ok,
+    failedChecks(report).join(', ') || 'nothing failed',
+  );
+  check(
+    'and the signature check in particular is not failed by a disagreement',
+    report.checks.some((c) => c.name === 'record signature and schema' && c.ok),
+  );
+  check('no check is reported as failing', failedChecks(report).length === 0, failedChecks(report).join(', '));
+  check('the printed report marks it as a warning, distinctly from ok and FAIL', rendered.includes('  warn  observer disagreement:'), rendered);
+  check('and still prints the verdict as verified', rendered.includes('Verified. Contents are intact'), rendered);
+  check(
+    'and says plainly that a warning is not part of the verdict',
+    rendered.includes('not part of this verdict'),
+    rendered,
+  );
+}
+
+/**
+ * OBS-AGREE-003. The node had nothing to say.
+ *
+ * An observation that could not be made is a fact about the run, not a disagreement, and above all
+ * not agreement: silence must never be written up as a second observer confirming the first.
+ */
+recordExecution('OBS-AGREE-003');
+{
+  const { report, rendered } = await verifiedWithObservation('unavailable');
+  check('an unavailable node still verifies', report.ok, failedChecks(report).join(', ') || 'nothing failed');
+  check('and raises no warning, because nobody disagreed', report.warnings.length === 0, report.warnings.map((w) => w.name).join(', '));
+  check(
+    'it is recorded as an informational check saying no status was reported',
+    report.checks.some((c) => c.name === 'rpc observation' && c.ok && c.detail.includes('no status')),
+    report.checks.find((c) => c.name === 'rpc observation')?.detail ?? 'no such check',
+  );
+  check(
+    'and nothing in the report reads as corroboration',
+    !/\bagree|\bconfirm|\bcorroborat|\bprove/i.test(rendered),
+    rendered,
+  );
 }
 
 // ---------------------------------------------------------------------------------------------
