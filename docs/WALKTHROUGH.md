@@ -128,6 +128,13 @@ solely as the authority on the token transfer, which moves USDC and spends none 
 lamports. The preflight prints the SOL balance because it is useful to see, and gates nothing on
 it.
 
+Three accounts are therefore visible in a live acceptance run and stay distinct: the **payer**,
+whose key signs the token transfer; the **service recipient**, `PEAC_EXAMPLE_PAY_TO`, which receives
+the USDC; and the **facilitator fee payer**, which pays the transaction fee. The preflight refuses a
+run where the recipient is the payer address, before it opens any connection. That is an invariant
+of this demonstration, so both roles stay independently observable in the evidence, and it is not a
+rule of x402 or of Solana.
+
 Re-run the preflight until every check passes. It records that a wallet was prepared here, which is
 a convenience for you and nothing more: the live run repeats every check itself.
 

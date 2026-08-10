@@ -172,6 +172,7 @@ export const ACCEPTANCE_CASES = {
    */
   'PRE-RV-001': { description: 'a live run with no payer key stops before any network call', scope: 'local' },
   'PRE-RV-002': { description: 'a live run with an invalid recipient stops before any network call', scope: 'local' },
+  'PRE-ROLE-001': { description: 'a run whose recipient is the payer stops before any network call', scope: 'local' },
   'PRE-ADDR-001': { description: 'a valid Solana address is accepted as the recipient', scope: 'local' },
   'PRE-ADDR-002': { description: 'a recipient that is not valid base58 is rejected', scope: 'local' },
   'PRE-ADDR-003': { description: 'a recipient of the wrong length is rejected', scope: 'local' },

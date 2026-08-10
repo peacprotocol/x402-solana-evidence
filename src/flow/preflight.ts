@@ -98,6 +98,29 @@ function recipientCheck(payTo: string | undefined): PreflightCheck {
 }
 
 /**
+ * The payer and the recipient have to be two different accounts.
+ *
+ * A DEMONSTRATION INVARIANT OF THIS EXAMPLE, and nothing more. Neither x402 nor Solana forbids
+ * paying yourself, and a real integration may have perfectly good reasons to. This example exists
+ * to show a payment moving between parties and being recorded as such, and a run where the payer
+ * and the recipient are one account produces evidence in which the two roles cannot be told apart
+ * by anyone reading it. So it is refused here, on local grounds, before anything reaches a network.
+ *
+ * @param payTo - The configured recipient, already established as an address.
+ * @param payerAddress - The address of the key that will sign the payment.
+ */
+export function distinctRolesCheck(payTo: string, payerAddress: string): PreflightCheck {
+  const name = 'payer and recipient are distinct';
+  if (payTo !== payerAddress) return ok(name, 'the payment moves between two accounts');
+  return failed(
+    name,
+    'the configured recipient is the payer address; this example requires them to differ so both ' +
+      'roles stay independently observable in the evidence. That is an invariant of this ' +
+      'demonstration, not a rule of x402 or of Solana',
+  );
+}
+
+/**
  * Checks that need no network.
  *
  * Separated so they can be exercised offline, including their failure paths, without the suite
@@ -254,6 +277,13 @@ export async function runPreflight(options: PreflightOptions): Promise<Preflight
   } else {
     payerAddress = (await resolvePayerSigner(keyPath)).address;
   }
+
+  // The recipient is an address by now: the local checks above refuse anything else and return
+  // before reaching here. This is the last thing decidable without a connection, so it is decided
+  // before one is opened.
+  if (options.payTo === undefined) return { ready: false, checks, payerAddress };
+  checks.push(distinctRolesCheck(options.payTo, payerAddress));
+  if (checks.some((c) => c.status === 'failed')) return { ready: false, checks, payerAddress };
 
   checks.push(...(await checkChainState(payerAddress, options.rpcUrl)));
   checks.push(await checkFacilitatorSupport(options.facilitatorClient, options.network));

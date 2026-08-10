@@ -20,7 +20,12 @@ import { join } from 'node:path';
 import { SOLANA_DEVNET_CAIP2, USDC_DEVNET_ADDRESS } from '@x402/svm';
 import type { FacilitatorClient } from '@x402/core/server';
 import { beginAcceptanceSuite, recordExecution } from './acceptance-ids.ts';
-import { checkLocalConfiguration, runPreflight, type PreflightCheck } from './flow/preflight.ts';
+import {
+  checkLocalConfiguration,
+  distinctRolesCheck,
+  runPreflight,
+  type PreflightCheck,
+} from './flow/preflight.ts';
 import { createPayerKeyFile } from './flow/payer-key.ts';
 
 beginAcceptanceSuite('preflight');
@@ -119,6 +124,53 @@ recordExecution('PRE-RV-002');
   check(
     'it did not read the payer key either, having already stopped',
     report.payerAddress === undefined,
+  );
+}
+
+/**
+ * PRE-ROLE-001. The recipient is the payer.
+ *
+ * Refused on local grounds, before a connection exists. The wording matters as much as the refusal:
+ * this is an invariant of the demonstration, so that both roles stay legible in the evidence, and
+ * it is never presented as a rule of x402 or of Solana.
+ */
+recordExecution('PRE-ROLE-001');
+{
+  const payerKeyPath = join(workspace, 'self-paying-payer.json');
+  const payer = await createPayerKeyFile(payerKeyPath);
+  const { client, asked } = watchfulFacilitator();
+  const report = await runPreflight({
+    network: SOLANA_DEVNET_CAIP2,
+    payTo: payer.address,
+    asset: USDC_DEVNET_ADDRESS,
+    rpcUrl: UNREACHABLE_RPC_URL,
+    facilitatorClient: client,
+    payerKeyMode: 'require-existing',
+    payerKeyPath,
+  });
+  const role = named(report.checks, 'payer and recipient are distinct');
+
+  check('a run paying its own payer is not ready', report.ready === false);
+  check('it says the payer and the recipient are the same account', role?.status === 'failed', report.checks.map((c) => `${c.name}=${c.status}`).join(', '));
+  check(
+    'it says this is a demonstration invariant, not a protocol rule',
+    (role?.detail ?? '').includes('demonstration') &&
+      (role?.detail ?? '').includes('not a rule of x402 or of Solana'),
+    role?.detail,
+  );
+  check('it never asked the facilitator anything', asked() === false);
+  check(
+    'it never reached the chain checks',
+    named(report.checks, 'endpoint genesis matches devnet') === undefined &&
+      named(report.checks, 'payer holds devnet USDC') === undefined,
+  );
+
+  // The other direction, exercised directly rather than through a run: a full preflight with a
+  // distinct recipient would go on to open a connection, which no case here is allowed to do.
+  check(
+    'a recipient that is not the payer passes the same check',
+    distinctRolesCheck(VALID_RECIPIENT, payer.address).status === 'ok',
+    distinctRolesCheck(VALID_RECIPIENT, payer.address).detail,
   );
 }
 
