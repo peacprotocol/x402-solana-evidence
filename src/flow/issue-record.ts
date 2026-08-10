@@ -16,7 +16,8 @@
  * of the determinism arrangement: the record identifier is supplied, every other input is fixed,
  * and no part of the issuance path is patched or reimplemented.
  */
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { existsSync, mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { issue } from '@peac/protocol';
@@ -213,11 +214,82 @@ export async function issueEvidence(inputs: EvidenceInputs): Promise<EvidenceLay
   return { jws: result.jws, files };
 }
 
-/** Write an evidence layout to a directory, creating it if needed. */
+/**
+ * Write an evidence layout to a directory, creating it if needed.
+ *
+ * Writes in place, which is what the deterministic fixture needs: it rewrites one committed
+ * directory with identical bytes every run, and `git diff` after a run is the determinism check.
+ * Staging and renaming that directory would mean deleting and recreating tracked files to produce
+ * the same content, which is worse than the failure it would guard against, and an interrupted
+ * fixture run is recoverable from the repository. A live run writes into a directory nothing else
+ * can restore, so it uses `writeEvidenceTransactionally` below instead.
+ */
 export function writeEvidence(directory: string, layout: EvidenceLayout): void {
   for (const [relativePath, bytes] of layout.files) {
     const target = join(directory, relativePath);
     mkdirSync(dirname(target), { recursive: true });
     writeFileSync(target, bytes);
   }
+}
+
+/** A run whose destination already exists. The existing directory is never touched. */
+export class EvidenceCollisionError extends Error {
+  constructor(readonly directory: string) {
+    super(
+      `Evidence already exists at ${directory}\n` +
+        '  It was not modified, and nothing was written. A run\'s evidence belongs to that run.',
+    );
+    this.name = 'EvidenceCollisionError';
+  }
+}
+
+/** Distinguishes concurrent runs that share a starting instant. */
+function stagingToken(): string {
+  return `${Date.now().toString(36)}-${randomBytes(6).toString('hex')}`;
+}
+
+/**
+ * Write a live run's evidence so that the destination is either complete or absent.
+ *
+ * A directory that appears one file at a time is readable halfway through, and a reader has no way
+ * to tell an emission that is still running, or one that died, from a complete set someone has
+ * since edited. So everything is written to a uniquely named staging directory beside the
+ * destination, verified there, and only then moved into place with a single rename.
+ *
+ * The consequence is the property worth having: a final directory existing means a complete,
+ * verified artifact set. It is never overwritten and never merged into, because a previous run's
+ * evidence is that run's, and reusing its name would silently restate what it recorded.
+ *
+ * A failure leaves the staging directory where it is rather than deleting it. Its name says it is
+ * incomplete, the destination still does not exist, and a run that has already spent real funds
+ * should not have its artifacts discarded to keep the output tidy.
+ *
+ * @param input.finalDirectory - Where complete evidence belongs. Must not already exist.
+ * @param input.layout - The artifacts to write.
+ * @param input.finalize - Verification and anything else that belongs in the directory, run against
+ *   the staged path so its output arrives with the rest or not at all. Throwing aborts the move.
+ * @throws EvidenceCollisionError when the destination exists, before anything is written.
+ */
+export async function writeEvidenceTransactionally(input: {
+  readonly finalDirectory: string;
+  readonly layout: EvidenceLayout;
+  readonly finalize: (stagedDirectory: string) => Promise<void>;
+}): Promise<void> {
+  const { finalDirectory, layout, finalize } = input;
+  if (existsSync(finalDirectory)) throw new EvidenceCollisionError(finalDirectory);
+
+  const parent = dirname(finalDirectory);
+  mkdirSync(parent, { recursive: true });
+  const staged = join(parent, `.tmp-${stagingToken()}`);
+  // Created exclusively: a name that somehow already exists is a collision, not a directory to
+  // write into, and the run stops rather than mixing two emissions together.
+  mkdirSync(staged);
+
+  writeEvidence(staged, layout);
+  await finalize(staged);
+
+  // Re-checked immediately before the move, because the destination is decided by a clock and two
+  // runs could reach this point in the same second.
+  if (existsSync(finalDirectory)) throw new EvidenceCollisionError(finalDirectory);
+  renameSync(staged, finalDirectory);
 }

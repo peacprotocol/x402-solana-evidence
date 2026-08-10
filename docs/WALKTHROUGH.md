@@ -182,6 +182,14 @@ directory is gitignored: it describes one run rather than a fixture. It does not
 `fixtures/expected-evidence/`, which belongs to the reproducible fixture run and is checked byte for
 byte, so a live run must never overwrite it.
 
+The directory is written so that it is either complete or absent. Everything goes to a uniquely
+named `out/.tmp-<token>/` first: the artifacts, the verification, the report and a `how-to-verify`
+note. Only once all of that has succeeded is it moved into place with a single rename. So a
+`out/devnet-<timestamp>/` that exists is a complete artifact set that passed verification, never
+however far a run happened to get, and an existing one is never overwritten or written into. A run
+that fails leaves its staging directory where it is, under a name that says it is incomplete, rather
+than discarding the artifacts of a run that spent funds.
+
 ```text
 out/devnet-<timestamp>-issuer.pub.json   the public half of the signing key, beside the run
 out/devnet-<timestamp>/
@@ -194,6 +202,7 @@ out/devnet-<timestamp>/
   artifacts/payment-signature.txt   the payment value the client presented
   artifacts/payment-response.txt    the settlement value the origin emitted
   verification-report.txt           the verification below, as printed
+  how-to-verify.txt                 the command above and what it does not establish
 ```
 
 Which of those exist depends on where the run ended: the artifact presence contract below is the
@@ -352,6 +361,13 @@ A zero SOL balance is not a failure and does not need funding.
 **The preflight refuses an existing key file.** A key file that cannot be read as a key is never
 replaced, because replacing it would destroy a key that may hold funds. Move or repair the named
 file yourself, then run the preflight again.
+
+**`pnpm demo:devnet` says evidence already exists at that path.** A run's directory belongs to that
+run and is never overwritten or written into. Move or rename the existing one if you want the name
+back.
+
+**There is an `out/.tmp-...` directory.** An emission did not complete, so nothing was moved into
+place. It holds whatever that run got as far as writing. Inspect it, then remove it.
 
 ## What a successful verification means
 

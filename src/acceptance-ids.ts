@@ -104,6 +104,8 @@ export const ACCEPTANCE_CASES = {
    */
   'SVM-RPC-001': { description: 'a node status is recorded as a separate observation naming its source', scope: 'local' },
   'SVM-RPC-002': { description: 'an unavailable node is recorded honestly and does not cost the run its evidence', scope: 'local' },
+  'EVID-TX-001': { description: 'an interrupted emission leaves no final evidence directory', scope: 'local' },
+  'EVID-TX-002': { description: 'an existing evidence directory is never overwritten or written into', scope: 'local' },
 
   'SVM-DET-001': { description: 'the offline end-to-end run produces byte-identical evidence across runs', scope: 'ci-external' },
   'SVM-NET-001': { description: 'the offline end-to-end run passes in a job with networking disabled', scope: 'ci-external' },

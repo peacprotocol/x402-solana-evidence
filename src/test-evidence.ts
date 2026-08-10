@@ -11,16 +11,30 @@
  * Nothing here opens a connection or spawns a process.
  */
 import { generateKeypair } from '@peac/crypto';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { SOLANA_DEVNET_CAIP2 } from '@x402/svm';
+import { registerExactSvmScheme } from '@x402/svm/exact/server';
 import { beginAcceptanceSuite, recordExecution } from './acceptance-ids.ts';
 import * as F from '../fixtures/deterministic.ts';
+import { createFixtureFacilitatorClient } from './flow/fixture-facilitator.ts';
 import { buildEvidence, FIXTURE_EVIDENCE_OPTIONS, runOnce } from './flow/fixture-e2e.ts';
+import { createPaidResource } from './flow/server.ts';
 import {
+  EvidenceCollisionError,
   EXPECTED_EVIDENCE_DIR,
   EXPECTED_EVIDENCE_DISPLAY,
   writeEvidence,
+  writeEvidenceTransactionally,
 } from './flow/issue-record.ts';
 import { resolveIssuerKey } from './flow/issuer-key.ts';
 import { observeSettlement } from './flow/observe-settlement.ts';
@@ -447,6 +461,147 @@ recordExecution('SVM-RPC-002');
 
   rmSync(directory, { recursive: true, force: true });
   rmSync(tamperedDirectory, { recursive: true, force: true });
+}
+
+// ---------------------------------------------------------------------------------------------
+// Emission: the destination is complete, or it is not there.
+// ---------------------------------------------------------------------------------------------
+
+console.log('\nTransactional evidence emission\n');
+
+const emissionLayout = await buildEvidence(await runOnce());
+
+/** Names of the staging directories left beside a destination. */
+const staged = (parent: string): string[] =>
+  readdirSync(parent).filter((entry) => entry.startsWith('.tmp-'));
+
+/**
+ * EVID-TX-001. An emission that fails part way through.
+ *
+ * The fault is injected after the artifacts are staged and before the move, which is exactly where
+ * a verification failure or a crash would land. What must not exist afterwards is the destination:
+ * a reader who finds it has to be able to treat it as complete.
+ */
+recordExecution('EVID-TX-001');
+{
+  const parent = mkdtempSync(join(tmpdir(), 'peac-emission-'));
+  const destination = join(parent, 'devnet-run');
+
+  let thrown: Error | undefined;
+  try {
+    await writeEvidenceTransactionally({
+      finalDirectory: destination,
+      layout: emissionLayout,
+      finalize: async (stagedDirectory) => {
+        // Proves the fault happened after the artifacts were written, not before.
+        check(
+          'artifacts are staged before anything is finalized',
+          existsSync(join(stagedDirectory, 'record.jws')),
+        );
+        throw new Error('synthetic failure during finalization');
+      },
+    });
+  } catch (e) {
+    thrown = e as Error;
+  }
+
+  check('an interrupted emission reports the failure', thrown?.message.includes('synthetic failure') === true);
+  check('and leaves no final evidence directory', !existsSync(destination));
+  check(
+    'what it wrote stays under a name that says it is incomplete',
+    staged(parent).length === 1,
+    staged(parent).join(', ') || 'nothing',
+  );
+  check(
+    'nothing partial is reachable under the destination name',
+    !existsSync(join(destination, 'record.jws')),
+  );
+
+  rmSync(parent, { recursive: true, force: true });
+}
+
+/**
+ * EVID-TX-002. A destination that already exists.
+ *
+ * Refused before anything is written, and the existing directory is not read, merged into or
+ * touched. A previous run's evidence is that run's.
+ */
+recordExecution('EVID-TX-002');
+{
+  const parent = mkdtempSync(join(tmpdir(), 'peac-emission-'));
+  const destination = join(parent, 'devnet-run');
+  mkdirSync(destination);
+  const sentinel = join(destination, 'record.jws');
+  writeFileSync(sentinel, 'an earlier run wrote this');
+
+  let reachedFinalize = false;
+  let thrown: unknown;
+  try {
+    await writeEvidenceTransactionally({
+      finalDirectory: destination,
+      layout: emissionLayout,
+      finalize: async () => {
+        reachedFinalize = true;
+      },
+    });
+  } catch (e) {
+    thrown = e;
+  }
+
+  check('a colliding destination is refused', thrown instanceof EvidenceCollisionError, String(thrown));
+  check('nothing was staged, because it stopped before writing', staged(parent).length === 0);
+  check('and nothing was verified either', reachedFinalize === false);
+  check(
+    'the existing directory is byte for byte what it was',
+    readFileSync(sentinel, 'utf8') === 'an earlier run wrote this',
+  );
+
+  rmSync(parent, { recursive: true, force: true });
+}
+
+/** The successful path: everything staged, everything finalized, one directory in place. */
+{
+  const parent = mkdtempSync(join(tmpdir(), 'peac-emission-'));
+  const destination = join(parent, 'devnet-run');
+
+  await writeEvidenceTransactionally({
+    finalDirectory: destination,
+    layout: emissionLayout,
+    finalize: async (stagedDirectory) => {
+      writeFileSync(join(stagedDirectory, 'verification-report.txt'), 'verified\n');
+    },
+  });
+
+  check('a completed emission puts the directory in place', existsSync(join(destination, 'record.jws')));
+  check(
+    'and whatever finalization wrote arrived with it',
+    existsSync(join(destination, 'verification-report.txt')),
+  );
+  check('leaving no staging directory behind', staged(parent).length === 0);
+
+  const report = await verifyEvidence(destination, fixtureKey.publicKey);
+  check('the directory it left verifies', report.ok, failedChecks(report).join(', ') || 'nothing failed');
+
+  rmSync(parent, { recursive: true, force: true });
+}
+
+/** The origin does not advertise its framework on every response. */
+{
+  const resource = await createPaidResource({
+    facilitatorClient: createFixtureFacilitatorClient(SOLANA_DEVNET_CAIP2, {}),
+    registerSchemes: (server) => {
+      registerExactSvmScheme(server, { networks: [SOLANA_DEVNET_CAIP2] });
+    },
+    network: SOLANA_DEVNET_CAIP2,
+    payTo: F.PAY_TO,
+    price: { asset: F.ASSET_MINT, amount: F.AMOUNT_BASE_UNITS },
+    method: 'GET',
+    path: '/v1/forecast',
+    resourceUrl: F.RESOURCE_URL,
+    maxTimeoutSeconds: F.MAX_TIMEOUT_SECONDS,
+    handler: () => ({ status: 200, contentType: 'application/json', body: F.ORIGIN_RESULT_BODY }),
+  });
+  check('the origin does not advertise the framework it runs on', resource.app.enabled('x-powered-by') === false);
 }
 
 rmSync(workspace, { recursive: true, force: true });

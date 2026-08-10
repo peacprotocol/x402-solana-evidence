@@ -51,7 +51,7 @@ import {
   runEvidenceDisplay,
   runPublicKeyDisplay,
   runPublicKeyPath,
-  writeEvidence,
+  writeEvidenceTransactionally,
 } from './issue-record.ts';
 import { resolveIssuerKey } from './issuer-key.ts';
 import { SUPPLIED_KEY_CAVEAT, writeIssuerPublicKeyFile } from './public-key-file.ts';
@@ -109,10 +109,41 @@ function outsiderInstructions(runId: string): string {
     '',
     'Verify this evidence from the files and the key alone:',
     '',
-    `  corepack pnpm@8.15.0 verify -- --evidence ${runEvidenceDisplay(runId)} ` +
-      `--public-key ${runPublicKeyDisplay(runId)}`,
+    `  ${verificationCommand(runId)}`,
     '',
     `  ${SUPPLIED_KEY_CAVEAT}`,
+    '',
+  ].join('\n');
+}
+
+function verificationCommand(runId: string): string {
+  return (
+    `corepack pnpm@8.15.0 verify -- --evidence ${runEvidenceDisplay(runId)} ` +
+    `--public-key ${runPublicKeyDisplay(runId)}`
+  );
+}
+
+/**
+ * The note left in the directory for whoever reads it next.
+ *
+ * Written inside the same staged emission as the artifacts, so a directory that exists always
+ * carries its own instructions rather than depending on someone having kept the console output.
+ */
+function reviewerNotes(runId: string): string {
+  return [
+    `Evidence for devnet run ${runId}`,
+    '',
+    'This directory was written in full, verified, and only then moved into place. Its presence',
+    'means a complete artifact set that passed verification at the moment it was written.',
+    '',
+    'Verify it yourself, from these files and the public key beside this directory:',
+    '',
+    `  ${verificationCommand(runId)}`,
+    '',
+    SUPPLIED_KEY_CAVEAT.split('\n  ').join('\n'),
+    '',
+    'Devnet is a test network. The record says so, and no output of this run describes a payment',
+    'on a production network.',
     '',
   ].join('\n');
 }
@@ -300,24 +331,35 @@ export async function main(): Promise<void> {
     );
 
     const runId = runIdFor(observedAtUnixSeconds);
-    const directory = runEvidenceDir(runId);
     const display = runEvidenceDisplay(runId);
-    writeEvidence(directory, layout);
+    const issuerKey = await resolveIssuerKey('devnet');
+
+    /**
+     * Written so that the directory is either complete or absent.
+     *
+     * Everything below happens in a staging directory beside the destination: the artifacts, the
+     * verification an outside reader would perform, the report, and the note telling a reader how
+     * to repeat it. Only once all of that has succeeded does a single rename put it in place, so
+     * `out/<runId>/` existing means a complete and verified set rather than however far a run got.
+     */
+    await writeEvidenceTransactionally({
+      finalDirectory: runEvidenceDir(runId),
+      layout,
+      finalize: async (staged) => {
+        // Verified the way an outside reader would: from the files just written and a public key,
+        // with no access to the state the run still holds in memory.
+        const report = await verifyEvidence(staged, issuerKey.publicKey);
+        writeFileSync(join(staged, 'verification-report.txt'), formatReport(display, report).trimStart());
+        writeFileSync(join(staged, 'how-to-verify.txt'), reviewerNotes(runId));
+        console.log(formatReport(display, report));
+        if (!report.ok) throw new Error('the evidence written by this run did not verify');
+      },
+    });
     console.log(`  evidence            : ${display}`);
 
-    // Verified the way an outside reader would: from the files just written and a public key,
-    // with no access to the state the run still holds in memory.
-    const issuerKey = await resolveIssuerKey('devnet');
-    const report = await verifyEvidence(directory, issuerKey.publicKey);
-    writeFileSync(
-      join(directory, 'verification-report.txt'),
-      formatReport(display, report).trimStart(),
-    );
-    console.log(formatReport(display, report));
-    if (!report.ok) throw new Error('the evidence written by this run did not verify');
-
     // The public half of the signing key, beside the run it belongs to, so the directory can be
-    // handed to someone with no access to this machine. The private key is never written.
+    // handed to someone with no access to this machine. Written only once the directory is
+    // complete, and never the private half.
     writeIssuerPublicKeyFile(runPublicKeyPath(runId), issuerKey);
     console.log(outsiderInstructions(runId));
   } finally {

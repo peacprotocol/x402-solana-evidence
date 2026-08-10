@@ -240,6 +240,11 @@ export async function createPaidResource(options: PaidResourceOptions): Promise<
 
   const app = express();
 
+  // The framework advertises itself on every response by default. It tells a caller nothing they
+  // need and tells anyone watching which stack to look up, so it is turned off here rather than
+  // left to a deployment to remember.
+  app.disable('x-powered-by');
+
   // Runs before the payment middleware, so the request's recorder exists for every hook the
   // middleware fires and the finish listener is registered before anything is written.
   app.use((req: Request, res: Response, next) => {
