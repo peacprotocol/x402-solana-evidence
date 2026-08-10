@@ -1,0 +1,24 @@
+Reproducibility of this directory
+
+Every file here is byte-identical across runs of `pnpm demo:fixture`.
+
+Inputs that would otherwise vary are pinned, not suppressed:
+  record identifier (jti)   supplied to issuance: 01984000-0000-7000-8000-0000a1b20201
+  occurred-at and observed-at fixed at Unix 1785000000
+  payer, recipient, fee payer, blockhash and transaction reference are the fixed
+    synthetic values from the conformance fixtures
+  payment identifier        pay_0000000000000000000000000000f1x2
+  issuer key                the clearly labelled test-only key in src/flow/issuer-key.ts
+
+One input is derived from the process clock and cannot be supplied:
+  the issued-at claim (iat). PEAC issuance stamps it from the clock and exposes no option
+  to set it, so the offline run fixes the process clock around the issuance call and
+  restores it immediately afterwards. Nothing in the issuance path is patched or replaced.
+  The signature covers iat, so without this the record bytes, and only the record bytes,
+  would differ between runs.
+
+The listening port is not fixed and does not need to be: no bound value derives from it.
+The resource is identified by its configured URL, not by the loopback address.
+
+This evidence describes an offline run. No payment occurred, no facilitator or node was
+contacted, and the transaction reference is placeholder text.

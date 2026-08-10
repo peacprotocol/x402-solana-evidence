@@ -24,9 +24,25 @@ import {
   PAYMENT_IDENTIFIER,
   declarePaymentIdentifierExtension,
 } from '@x402/extensions/payment-identifier';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { beginAcceptanceSuite, recordExecution } from '../acceptance-ids.ts';
-import { requireValidX402Artifact } from '../x402-header.ts';
+import { captureObservedX402Artifact, requireValidX402Artifact } from '../x402-header.ts';
+import { buildOriginResultBinding, buildRequestBinding } from '../binding.ts';
+import { componentsFromAbsoluteUri } from '../components.ts';
+import type { Sha256Digest } from '../digest.ts';
 import * as F from '../../fixtures/deterministic.ts';
+import { resolveIssuerKey } from './issuer-key.ts';
+import { observeSettlement } from './observe-settlement.ts';
+import {
+  EXPECTED_EVIDENCE_DIR,
+  EXPECTED_EVIDENCE_DISPLAY,
+  issueEvidence,
+  writeEvidence,
+  type EvidenceLayout,
+  type ObservedFieldDigests,
+} from './issue-record.ts';
+import { formatReport, verifyEvidence } from './verify-evidence.ts';
 import { createFixtureFacilitatorClient, type FixtureFacilitatorBehavior } from './fixture-facilitator.ts';
 import { FixtureExactWallet } from './fixture-wallet.ts';
 import { createPaidResource, type OriginResult, type RequestObservation } from './server.ts';
@@ -130,6 +146,171 @@ export async function runOnce(options: RunOptions = {}): Promise<RunResult> {
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
+}
+
+/** Fixed record identifier, so a repeated offline run produces the same record bytes. */
+const FIXTURE_JTI = '01984000-0000-7000-8000-0000a1b20201';
+
+export const DETERMINISM_NOTE = 'determinism-note.txt';
+
+/**
+ * What makes the committed evidence reproducible, and what had to be pinned to get there.
+ *
+ * Written by the run rather than by hand, so it cannot describe an arrangement that has since
+ * changed.
+ */
+function determinismNote(): string {
+  return [
+    'Reproducibility of this directory',
+    '',
+    'Every file here is byte-identical across runs of `pnpm demo:fixture`.',
+    '',
+    'Inputs that would otherwise vary are pinned, not suppressed:',
+    `  record identifier (jti)   supplied to issuance: ${FIXTURE_JTI}`,
+    `  occurred-at and observed-at fixed at Unix ${F.FIXED_NOW_UNIX_SECONDS}`,
+    '  payer, recipient, fee payer, blockhash and transaction reference are the fixed',
+    '    synthetic values from the conformance fixtures',
+    `  payment identifier        ${F.PAYMENT_ID}`,
+    '  issuer key                the clearly labelled test-only key in src/flow/issuer-key.ts',
+    '',
+    'One input is derived from the process clock and cannot be supplied:',
+    '  the issued-at claim (iat). PEAC issuance stamps it from the clock and exposes no option',
+    '  to set it, so the offline run fixes the process clock around the issuance call and',
+    '  restores it immediately afterwards. Nothing in the issuance path is patched or replaced.',
+    '  The signature covers iat, so without this the record bytes, and only the record bytes,',
+    '  would differ between runs.',
+    '',
+    'The listening port is not fixed and does not need to be: no bound value derives from it.',
+    'The resource is identified by its configured URL, not by the loopback address.',
+    '',
+    'This evidence describes an offline run. No payment occurred, no facilitator or node was',
+    'contacted, and the transaction reference is placeholder text.',
+    '',
+  ].join('\n');
+}
+
+/**
+ * Turn one run into an evidence layout.
+ *
+ * Every observed field value goes through the same staged capture the rest of the profile uses, so
+ * the digest that reaches the record is over a value that was accepted at the capture boundary
+ * rather than over whatever bytes happened to arrive.
+ */
+export async function buildEvidence(run: RunResult): Promise<EvidenceLayout> {
+  const issuerKey = await resolveIssuerKey('fixture');
+
+  const observedRequired = run.challenge.observedHeaders['payment-required'];
+  if (observedRequired === undefined) throw new Error('no payment-required field was observed');
+  const requiredArtifact = await captureObservedX402Artifact({
+    name: 'Payment-Required',
+    observedValue: observedRequired,
+    capturePoint: 'origin_response_before_gateway',
+    httpVersion: '1.1',
+  });
+
+  const observedSignature = run.origin.observedHeaders['payment-signature'];
+  const signatureArtifact =
+    observedSignature === undefined
+      ? undefined
+      : await captureObservedX402Artifact({
+          name: 'Payment-Signature',
+          observedValue: observedSignature,
+          capturePoint: 'origin_request_after_http_parsing',
+          httpVersion: '1.1',
+        });
+
+  const observedResponse = run.origin.observedHeaders['payment-response'];
+  const responseArtifact =
+    observedResponse === undefined
+      ? undefined
+      : await captureObservedX402Artifact({
+          name: 'Payment-Response',
+          observedValue: observedResponse,
+          capturePoint: 'origin_response_before_gateway',
+          httpVersion: '1.1',
+        });
+
+  const observedFields: ObservedFieldDigests = {
+    'payment-required': {
+      value: requiredArtifact.observedValue,
+      digest: requiredArtifact.observedValueDigest,
+    },
+    ...(signatureArtifact !== undefined
+      ? {
+          'payment-signature': {
+            value: signatureArtifact.observedValue,
+            digest: signatureArtifact.observedValueDigest,
+          },
+        }
+      : {}),
+    ...(responseArtifact !== undefined
+      ? {
+          'payment-response': {
+            value: responseArtifact.observedValue,
+            digest: responseArtifact.observedValueDigest,
+          },
+        }
+      : {}),
+  };
+
+  // The resource is identified by its configured URL, not by the loopback address the process
+  // happened to be given, so the binding describes the resource rather than the test harness.
+  const requestBinding = buildRequestBinding({
+    components: componentsFromAbsoluteUri({ method: 'GET', absoluteUri: F.RESOURCE_URL }),
+    body: F.REQUEST_BODY,
+    selectedHeaders:
+      signatureArtifact === undefined
+        ? []
+        : [{ name: 'payment-signature', observedValueDigest: signatureArtifact.observedValueDigest }],
+  });
+
+  const originResultBinding =
+    run.origin.originResult === undefined
+      ? undefined
+      : buildOriginResultBinding({
+          status: run.origin.originResult.status,
+          contentType: run.origin.originResult.contentType,
+          body: run.origin.originResult.body,
+        });
+
+  const serviceResultDigest: Sha256Digest | undefined = originResultBinding?.bodyDigest;
+
+  const chainObservation = observeSettlement({
+    requirements: run.client.paymentPayload.accepted,
+    paymentPayload: run.client.paymentPayload,
+    ...(run.client.parsed.header !== undefined && 'success' in run.client.parsed.header
+      ? { settleResponse: run.client.parsed.header }
+      : {}),
+    ...(responseArtifact !== undefined
+      ? { settlementResponseDigest: responseArtifact.observedValueDigest }
+      : {}),
+    ...(serviceResultDigest !== undefined ? { serviceResultDigest } : {}),
+    lifecycle: run.origin.lifecycle,
+    observationSource: {
+      kind: 'in_process_fixture',
+      reference: 'offline run, no facilitator and no node were contacted',
+    },
+    observedAtUnixSeconds: F.FIXED_NOW_UNIX_SECONDS,
+    assetDecimals: F.TOKEN_DECIMALS,
+  });
+
+  return issueEvidence({
+    issuerKey,
+    jti: FIXTURE_JTI,
+    occurredAt: new Date(F.FIXED_NOW_UNIX_SECONDS * 1000).toISOString(),
+    issuedAtUnixSeconds: F.FIXED_NOW_UNIX_SECONDS,
+    requestBinding,
+    ...(originResultBinding !== undefined ? { originResultBinding } : {}),
+    ...(run.origin.originResult !== undefined
+      ? { originResultBody: run.origin.originResult.body }
+      : {}),
+    observedFields,
+    chainObservation,
+    lifecycle: run.origin.lifecycle,
+    paymentReference: F.PAYMENT_ID,
+    currency: 'USDC',
+    environment: 'test',
+  });
 }
 
 /** Entry point for `demo:fixture`. Prints the run and records the cases it exercised. */
@@ -236,7 +417,21 @@ export async function main(): Promise<void> {
   console.log(`    client received bytes  : ${wrote ? 'an error response' : 'nothing'}`);
   console.log(`    payment-response field : ${capturedResponseField === undefined ? 'absent' : 'present'}`);
 
-  console.log('');
+  // The evidence for the successful run is written to the committed directory, then verified from
+  // that directory alone: the verifier is handed files and a public key, and nothing else.
+  const layout = await buildEvidence(success);
+  writeEvidence(EXPECTED_EVIDENCE_DIR, layout);
+  writeFileSync(join(EXPECTED_EVIDENCE_DIR, DETERMINISM_NOTE), determinismNote());
+
+  const issuerKey = await resolveIssuerKey('fixture');
+  const report = await verifyEvidence(EXPECTED_EVIDENCE_DIR, issuerKey.publicKey);
+  writeFileSync(
+    join(EXPECTED_EVIDENCE_DIR, 'verification-report.txt'),
+    formatReport(EXPECTED_EVIDENCE_DISPLAY, report).trimStart(),
+  );
+  console.log(formatReport(EXPECTED_EVIDENCE_DISPLAY, report));
+  if (!report.ok) throw new Error('the committed evidence did not verify');
+  recordExecution('SVM-FLOW-003');
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

@@ -48,6 +48,11 @@ jobs:
       - name: Offline end-to-end flow
         run: pnpm test:flow
 
+      # The committed evidence is verified from the directory and a public key alone, which is the
+      # position a reader of this repository is in.
+      - name: Verify the committed offline evidence
+        run: pnpm verify
+
       - name: Acceptance matrix completeness
         run: pnpm test:acceptance
 
@@ -69,6 +74,14 @@ jobs:
           pnpm demo:binding > /tmp/binding-run-1.txt
           pnpm demo:binding > /tmp/binding-run-2.txt
           diff /tmp/binding-run-1.txt /tmp/binding-run-2.txt
+
+      # SVM-DET-001: the end-to-end run rewrites the committed evidence in place, so a difference
+      # from what is committed is a determinism failure. Comparing against the repository rather
+      # than against a second run also catches evidence committed from a different tree.
+      - name: Offline evidence determinism
+        run: |
+          pnpm demo:fixture > /dev/null
+          git diff --exit-code -- fixtures/expected-evidence
 
   offline:
     name: offline path (no network)

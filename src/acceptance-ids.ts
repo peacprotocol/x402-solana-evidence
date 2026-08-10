@@ -61,7 +61,7 @@ export const ACCEPTANCE_CASES = {
   // Solana virtual machine exact-scheme reference flow.
   'SVM-FLOW-001': { description: 'offline end-to-end run reaches the response-write-attempted state', scope: 'local' },
   'SVM-FLOW-002': { description: 'the challenge carries a valid payment-required field value', scope: 'local' },
-  'SVM-FLOW-003': { description: 'a record is issued, verifies locally, and every digest recomputes', scope: 'planned' },
+  'SVM-FLOW-003': { description: 'a record is issued, verifies locally, and every digest recomputes', scope: 'local' },
   'SVM-FLOW-004': { description: 'devnet run with a real transaction signature', scope: 'live-acceptance' },
   'SVM-LIFE-001': { description: 'verification rejected: no resource execution, no settlement', scope: 'local' },
   'SVM-LIFE-002': { description: 'handler threw: cancellation, no settlement', scope: 'local' },
