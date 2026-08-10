@@ -1,16 +1,23 @@
 # PEAC Payment Evidence Example
 
-**Experimental deterministic binding profile and conformance fixtures for an x402 payment-evidence
-reference implementation.**
+**Experimental deterministic binding profile, conformance fixtures and an x402 Solana exact-scheme
+payment-evidence reference flow.**
 
 Non-normative: it does not extend or modify the PEAC wire format, record registry, extension
 registry or conformance requirements.
 
-The capture, validation and binding layers are implemented and deterministic. This example observes
-x402 payment field values, validates them in ordered stages using the upstream x402 runtime
-validators, and binds them to the HTTP operation that was requested and to the bytes the origin
-service produced. An end-to-end payment flow, PEAC record issuance and any chain interaction are
-**not implemented yet**; they arrive in the next change.
+This example observes x402 payment field values, validates them in ordered stages using the upstream
+x402 runtime validators, and binds them to the HTTP operation that was requested and to the bytes
+the origin service produced. It then runs the whole thing: a real express origin behind the real
+x402 payment middleware, a paying client, settlement, a signed PEAC record, and verification of the
+result from the files and a public key alone.
+
+The offline path is deterministic and needs no network, so the committed evidence in
+`fixtures/expected-evidence/` can be verified from a checkout. A live Solana devnet run is a
+documented manual step, not part of continuous integration.
+
+Start with the [walkthrough](docs/WALKTHROUGH.md) for the full command path, the lifecycle state
+machine and the devnet procedure.
 
 ## The gap this addresses
 
@@ -190,9 +197,12 @@ proxy trust before treating a forwarded scheme or authority as trusted.
 | field-value capture and staged validation | implemented |
 | request binding and origin-result binding | implemented |
 | conformance vectors and rejection corpus | implemented |
-| end-to-end payment flow | not yet implemented, arrives in the next change |
-| PEAC signed record issuance and offline verification | not yet implemented, arrives in the next change |
-| chain interaction, devnet settlement observation | not yet implemented, arrives in the next change |
+| end-to-end payment flow | implemented, offline and deterministic |
+| PEAC signed record issuance | implemented |
+| offline verification from files and a public key | implemented |
+| tamper detection | implemented |
+| settlement observation and chain-observation documents | implemented |
+| live Solana devnet run | manual acceptance step, see the [walkthrough](docs/WALKTHROUGH.md) |
 | scheme `upto` | out of scope |
 | batch settlement | out of scope |
 | streaming responses | out of scope |
@@ -204,10 +214,15 @@ proxy trust before treating a forwarded scheme or authority as trusted.
 
 ```bash
 corepack enable
-pnpm install
-pnpm test          # imports, conformance vectors, rejection corpus, acceptance matrix, typechecks
-pnpm demo:fixture  # readable walkthrough of the staged validation and binding output
+pnpm install --frozen-lockfile
+pnpm test           # every suite, the acceptance matrix and both typechecks
+pnpm demo:fixture   # the offline end-to-end run; writes and verifies the committed evidence
+pnpm verify         # verify that evidence from the files and a public key alone
+pnpm tamper-demo    # edit one bound field in a copy and watch verification name the failure
 ```
+
+Then read the [walkthrough](docs/WALKTHROUGH.md) for the lifecycle, the artifact presence contract
+and the Solana devnet procedure.
 
 ## Run
 
@@ -219,11 +234,18 @@ pnpm test                        # the full gate
 pnpm test:imports                # upstream export paths and exact version pins
 pnpm test:golden                 # conformance vectors and staged-validation reporting
 pnpm test:negative               # rejection corpus
+pnpm test:flow                   # offline end-to-end run and the lifecycle failure branches
+pnpm test:svm                    # security, replay, binding and tamper cases
 pnpm test:acceptance             # every declared acceptance case executed
 pnpm typecheck                   # TypeScript 7, primary
 pnpm typecheck:compat            # TypeScript 6, compatibility gate
-pnpm demo:fixture                # deterministic walkthrough
-pnpm demo:offline                # same walkthrough with egress diagnostics installed
+pnpm demo:binding                # deterministic binding walkthrough
+pnpm demo:fixture                # offline end-to-end run, writes fixtures/expected-evidence
+pnpm demo:offline                # binding walkthrough with egress diagnostics installed
+pnpm verify                      # verify the committed evidence
+pnpm tamper-demo                 # tamper demonstration, exits non-zero if an edit is not caught
+pnpm demo:devnet:prepare         # devnet preflight, fails closed with funding instructions
+pnpm demo:devnet                 # live devnet run, spends devnet funds
 pnpm gen:golden                  # regenerate the vectors, then review the diff
 ```
 
@@ -233,9 +255,15 @@ documents validate against closed JSON Schema 2020-12 files in `schemas/`.
 
 Acceptance cases carry stable identifiers declared in `src/acceptance-ids.ts`. The suites record
 each one as it executes and `pnpm test:acceptance` fails if a declared case did not run, so
-coverage cannot regress while the counts keep looking healthy. Two cases are scoped to continuous
-integration, because a single local process cannot reproduce them: the repeated-run byte comparison
-and the run with networking disabled.
+coverage cannot regress while the counts keep looking healthy. Four cases are scoped to continuous
+integration, because a single local process cannot reproduce them: two repeated-run byte
+comparisons and two runs with networking disabled. One case is scoped to live acceptance and is
+reported as pending until someone performs a devnet run, never as a result.
+
+One case is deliberately narrower than its name suggests, and the registry says so where it is
+declared: whether an SVM fee payer is isolated from the transfer it pays for is decided by the
+upstream facilitator against a real transaction, so what is asserted locally is the property this
+integration owns, which is that the fee payer never becomes a party to the payment.
 
 Fixtures are synthetic. Network and asset identifiers are the public Solana devnet constants
 exported by the upstream package; every payer, recipient, fee payer, transaction and signature value
