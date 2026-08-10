@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Reference example: portable payment evidence for x402 interactions using PEAC records.",
+  "description": "Reference implementation for portable, offline-verifiable evidence around x402 v2 SVM exact payment flows on Solana.",
   "license": "Apache-2.0",
   "engines": {
     "node": ">=22.13.0"

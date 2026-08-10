@@ -62,6 +62,7 @@ import {
 } from './flow/public-key-file.ts';
 import {
   formatReport,
+  isHelpRequest,
   parseVerifyArguments,
   UsageError,
   verifyEvidence,
@@ -167,6 +168,16 @@ recordExecution('EVID-CLI-001');
   );
   check('an option with no value is refused', usageRefusal(['--evidence', '--public-key']) !== undefined);
   check('an unrecognised argument is refused', usageRefusal(['--everything']) !== undefined);
+
+  // Asking for the usage text is a request this verifier can answer, so it is recognised before
+  // parsing rather than reported as an argument it cannot act on.
+  check(
+    'a request for usage is recognised rather than refused',
+    isHelpRequest(['--help']) &&
+      isHelpRequest(['--', '-h']) &&
+      !isHelpRequest([]) &&
+      !isHelpRequest(['--evidence', 'a', '--public-key', 'k']),
+  );
   check(
     'a repeated option is refused rather than resolved by position',
     usageRefusal(['--evidence', 'a', '--evidence', 'b', '--public-key', 'k']) !== undefined,

@@ -39,6 +39,15 @@ x402 challenge -> SVM exact payment -> origin result -> native settlement artifa
 - A missing or altered artifact fails at a named stage, so a failure says which claim is no longer
   supported instead of condemning the directory as a whole.
 
+## Evidence flow
+
+![Evidence flow](docs/evidence-flow.svg)
+
+The exchange across the top is x402's. What this example adds is the row beneath it: the directory
+the run writes, and a verifier that reads that directory and a public key and nothing else. The two
+observers of the settlement stay separate accounts throughout, and a failure names the stage rather
+than condemning the directory.
+
 ## How this relates to x402
 
 x402's signed offer and receipt extension provides portable proof-of-interaction and binds native

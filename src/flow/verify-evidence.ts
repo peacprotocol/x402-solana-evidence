@@ -524,6 +524,20 @@ export const VERIFY_USAGE = [
   '  verify --evidence <dir> --public-key <file>   verify any evidence directory',
 ].join('\n');
 
+const HELP_ARGUMENTS = new Set(['--help', '-h', 'help']);
+
+/**
+ * Whether the arguments ask for the usage text rather than a verification.
+ *
+ * Asking for help is a request this verifier can answer, not a command it cannot act on, so it is
+ * recognised before parsing rather than surfacing as an unrecognised argument. The separator is
+ * skipped for the same reason it is skipped when parsing.
+ */
+export function isHelpRequest(argv: readonly string[]): boolean {
+  const start = argv[0] === '--' ? 1 : 0;
+  return argv.slice(start).some((argument) => HELP_ARGUMENTS.has(argument));
+}
+
 export interface VerifyRequest {
   /** Directory to read. */
   readonly directory: string;
@@ -614,6 +628,10 @@ function keyFrom(path: string): LoadedIssuerPublicKey {
  * the directory.
  */
 export async function main(argv: readonly string[] = process.argv.slice(2)): Promise<void> {
+  if (isHelpRequest(argv)) {
+    console.log(`\n${VERIFY_USAGE}\n`);
+    return;
+  }
   const request = requestFrom(argv);
   const supplied = request.publicKeyFile === undefined ? undefined : keyFrom(request.publicKeyFile);
   const publicKey = supplied?.publicKey ?? (await resolveIssuerKey('fixture')).publicKey;

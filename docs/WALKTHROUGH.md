@@ -6,6 +6,8 @@ byte. The second spends devnet funds and produces a real Solana transaction refe
 Read the [README](../README.md) first for what the example is and, more importantly, for what
 verification does and does not establish.
 
+![Evidence flow](evidence-flow.svg)
+
 ## Prerequisites
 
 - Node 22.13 or newer. Node 24 is what the primary continuous-integration job runs.

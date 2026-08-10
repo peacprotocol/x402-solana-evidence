@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 420" width="900" height="420" role="img" aria-labelledby="ttl dsc">
+  <title id="ttl">Evidence flow</title>
+  <desc id="dsc">An x402 payment exchange between a client, an origin, a facilitator and a Solana RPC endpoint; the run writes an evidence directory holding a PEAC record, bindings, artifacts and a chain observation; an offline verifier reads that directory and a supplied public key and reports pass or fail at a named stage.</desc>
+  <style>
+    .t{font-family:ui-sans-serif,-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;fill:#1f2937}
+    .h{font-size:11px;font-weight:600}
+    .s{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:9.5px;fill:#4b5563}
+    .l{font-family:ui-sans-serif,-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;font-size:10px;fill:#374151}
+    .la{fill:#916a00}
+    .b{fill:#f9fafb;stroke:#6b7280;stroke-width:1.5}
+    .bp{fill:#f9fafb;stroke:#316cb5;stroke-width:1.5}
+    .ln{fill:none;stroke:#6b7280;stroke-width:1.2;marker-end:url(#a)}
+    .lw{fill:none;stroke:#916a00;stroke-width:1.2;marker-end:url(#aw)}
+    .lp{fill:none;stroke:#316cb5;stroke-width:1.2;marker-end:url(#ap)}
+    .life{stroke:#d1d5db;stroke-width:1;stroke-dasharray:3 4}
+  </style>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#6b7280"/></marker>
+    <marker id="aw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#916a00"/></marker>
+    <marker id="ap" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#316cb5"/></marker>
+  </defs>
+
+  <rect x="0.5" y="0.5" width="899" height="419" rx="8" fill="#ffffff" stroke="#e5e7eb"/>
+
+  <!-- participants -->
+  <rect class="b" x="32" y="18" width="116" height="38" rx="4"/>
+  <text class="t h" x="90" y="41" text-anchor="middle">Client</text>
+  <rect class="b" x="238" y="18" width="184" height="38" rx="4"/>
+  <text class="t h" x="330" y="41" text-anchor="middle">Origin (paid resource)</text>
+  <rect class="b" x="522" y="18" width="156" height="38" rx="4"/>
+  <text class="t h" x="600" y="41" text-anchor="middle">Facilitator</text>
+  <rect class="b" x="752" y="18" width="136" height="38" rx="4"/>
+  <text class="t h" x="820" y="41" text-anchor="middle">Solana RPC</text>
+
+  <!-- lifelines -->
+  <line class="life" x1="90" y1="56" x2="90" y2="282"/>
+  <line class="life" x1="330" y1="56" x2="330" y2="282"/>
+  <line class="life" x1="600" y1="56" x2="600" y2="282"/>
+  <line class="life" x1="820" y1="56" x2="820" y2="282"/>
+
+  <!-- exchange -->
+  <line class="lw" x1="330" y1="82" x2="92" y2="82"/>
+  <text class="l la" x="211" y="76" text-anchor="middle">402 + PAYMENT-REQUIRED</text>
+
+  <line class="ln" x1="90" y1="108" x2="328" y2="108"/>
+  <text class="l" x="209" y="102" text-anchor="middle">retry + PAYMENT-SIGNATURE</text>
+
+  <line class="ln" x1="330" y1="134" x2="598" y2="134"/>
+  <text class="l" x="464" y="128" text-anchor="middle">verify</text>
+
+  <line class="ln" x1="330" y1="160" x2="598" y2="160"/>
+  <text class="l" x="464" y="154" text-anchor="middle">settle</text>
+
+  <line class="ln" x1="600" y1="186" x2="818" y2="186"/>
+  <text class="l" x="709" y="180" text-anchor="middle">transaction submitted</text>
+
+  <line class="ln" x1="600" y1="212" x2="332" y2="212"/>
+  <text class="l" x="466" y="206" text-anchor="middle">PAYMENT-RESPONSE</text>
+
+  <line class="ln" x1="330" y1="238" x2="818" y2="238"/>
+  <rect x="462" y="222" width="224" height="13" fill="#ffffff"/>
+  <text class="l" x="574" y="232" text-anchor="middle">observe transaction (separate observer)</text>
+
+  <line class="ln" x1="330" y1="264" x2="92" y2="264"/>
+  <text class="l" x="211" y="258" text-anchor="middle">origin result: status and bytes</text>
+
+  <!-- run writes the evidence directory -->
+  <line class="lp" x1="330" y1="282" x2="330" y2="298"/>
+  <text class="l" x="340" y="292">written by the run</text>
+
+  <rect class="bp" x="40" y="300" width="300" height="58" rx="4"/>
+  <text class="t h" x="52" y="320">Evidence directory</text>
+  <text class="s" x="52" y="336">record.jws | request and result bindings</text>
+  <text class="s" x="52" y="350">artifacts | chain observation</text>
+
+  <rect class="b" x="40" y="376" width="300" height="32" rx="4"/>
+  <text class="t h" x="52" y="396">Issuer public key (supplied separately)</text>
+
+  <!-- offline verification -->
+  <line class="ln" x1="340" y1="340" x2="458" y2="340"/>
+  <text class="l" x="399" y="334" text-anchor="middle">evidence</text>
+
+  <polyline class="ln" points="340,392 400,392 400,368 458,368"/>
+  <text class="l" x="344" y="386">public key</text>
+
+  <rect class="b" x="460" y="326" width="200" height="56" rx="4"/>
+  <text class="t h" x="474" y="348">Offline verifier</text>
+  <text class="s" x="474" y="364">no network, no origin</text>
+
+  <line class="ln" x1="660" y1="354" x2="698" y2="354"/>
+
+  <rect class="b" x="700" y="326" width="180" height="56" rx="4"/>
+  <text class="t h" x="714" y="348">PASS / FAIL</text>
+  <text class="s" x="714" y="364">at a named stage</text>
+</svg>
