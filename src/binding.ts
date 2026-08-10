@@ -5,9 +5,12 @@
  * PEAC wire format, record registry, extension registry or conformance requirements, and they are
  * not a protocol surface.
  *
- * They exist because x402's offer-to-receipt matching compares resource URL, network, payer and
- * recency, and so binds payment artifacts to each other rather than to the operation requested or
- * the bytes the origin produced.
+ * WHAT THEY ADD, AND TO WHAT. x402's signed offer and receipt extension provides portable
+ * proof-of-interaction and binds native payment artifacts to resource and payment context. These
+ * documents add a PEAC-signed binding over selected RFC 9421 request components and over the exact
+ * bytes the origin produced, so the payment and the operation it paid for can be checked together
+ * offline. The two are complementary: native x402 artifacts stay authoritative for their own
+ * claims, and nothing here repairs, reinterprets or replaces them.
  *
  * Canonicalization and digests use the protocol helper. Digests use a single representation:
  * `sha256:<64 lowercase hex>`.

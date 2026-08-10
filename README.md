@@ -19,14 +19,16 @@ documented manual step, not part of continuous integration.
 Start with the [walkthrough](docs/WALKTHROUGH.md) for the full command path, the lifecycle state
 machine and the devnet procedure.
 
-## The gap this addresses
+## How this relates to x402
 
-x402 v2 already provides signed offers, signed receipts, payment identifiers and builder codes, and
-its offer-to-receipt matching compares resource URL, network, payer and recency. That binds payment
-artifacts to one another. It does not bind them to the operation the client asked for, or to what
-the service actually returned.
+x402's signed offer and receipt extension provides portable proof-of-interaction and binds native
+payment artifacts to resource and payment context. This reference adds a PEAC-signed binding over
+selected RFC 9421 HTTP request components, the exact origin-produced result bytes by digest, native
+x402 artifact digests, and explicit failure-state and presence semantics that can be verified
+offline.
 
-This example adds two application-local documents and nothing else:
+The two are complementary, not corrective. This example adds two application-local documents and
+nothing else:
 
 | Profile | Binds |
 |---|---|
