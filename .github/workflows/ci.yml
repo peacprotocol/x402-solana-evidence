@@ -13,7 +13,7 @@ permissions:
 jobs:
   verify:
     name: verify (node ${{ matrix.node }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -80,7 +80,12 @@ jobs:
 
   offline:
     name: offline path (no network)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    env:
+      # The runtime for the no-network gate, pinned by digest for the same reason the actions above
+      # are pinned by commit SHA: a tag can be repointed, a digest cannot. This is the multi-platform
+      # index digest of the node:24 tag, which is Node 24.19.0 at the time of pinning.
+      OFFLINE_NODE_IMAGE: 'node:24@sha256:934240a162082fd8b8a2f90cd5114446443f1eba1c5378f6687167ca405e6584'
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -107,7 +112,7 @@ jobs:
         run: |
           docker run --rm --network=none \
             -v "$PWD:/work" -w /work \
-            node:24 \
+            "$OFFLINE_NODE_IMAGE" \
             node src/fixture-demo.ts
 
       # The end-to-end flow serves and consumes the paid resource over the loopback interface,
@@ -117,12 +122,12 @@ jobs:
         run: |
           docker run --rm --network=none \
             -v "$PWD:/work" -w /work \
-            node:24 \
+            "$OFFLINE_NODE_IMAGE" \
             node src/flow/fixture-e2e.ts
 
   secret-scan:
     name: secret scan
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       # The upstream action is deliberately not used. It requires a license key for repositories
       # owned by an organization, and this workflow uses no secrets at all so that a fork pull
@@ -148,6 +153,58 @@ jobs:
           echo "${GITLEAKS_SHA256}  gitleaks.tar.gz" | sha256sum -c -
           tar xzf gitleaks.tar.gz gitleaks
           ./gitleaks version
+
+      # The scan below reports either findings or silence, and silence is the answer this job
+      # almost always gives. Silence from an engine that was never shown to speak is worth nothing,
+      # so the engine is made to detect something before its quiet on this repository is believed.
+      #
+      # A throwaway repository holding one wholly synthetic credential is scanned with the exact
+      # binary downloaded above, under the default rules, and detection is required twice over: by
+      # exit status, and by the identity of the rule that fired. A misconfigured, truncated or
+      # silently failing binary fails here rather than passing this job with an empty report.
+      #
+      # The canary value is assembled at run time from two halves. Written whole it would be a real
+      # match for the default rule set, and the history scan below reads this workflow file too.
+      - name: Prove the scanner detects before trusting it
+        env:
+          CANARY_PREFIX: 'AKIA'
+          CANARY_BODY: 'QYLPMN5HHFTRW6ZA'
+        run: |
+          set -euo pipefail
+          canary="$RUNNER_TEMP/scanner-canary"
+          rm -rf "$canary"
+          mkdir -p "$canary"
+          cd "$canary"
+          git init -q -b main .
+          git config user.name 'Scanner Canary'
+          git config user.email 'canary@example.invalid'
+          printf 'aws_access_key_id = %s%s\n' "$CANARY_PREFIX" "$CANARY_BODY" > credentials.txt
+          git add credentials.txt
+          git commit -qm 'Synthetic credential for scanner self-test'
+
+          set +e
+          "$RUNNER_TEMP/gitleaks" git . \
+            --no-banner --no-color --redact \
+            --report-format json --report-path "$canary/report.json"
+          detected=$?
+          set -e
+
+          if [ "$detected" -eq 0 ]; then
+            echo "The scanner found nothing in a repository where a credential was planted."
+            echo "Its verdict on this repository's history would mean nothing, so this job fails."
+            exit 1
+          fi
+
+          if ! grep -q '"RuleID": *"aws-access-token"' "$canary/report.json"; then
+            echo "The scanner reported findings but not the expected rule, so it did not detect"
+            echo "the planted credential and its rule set is not what this job assumes."
+            cat "$canary/report.json"
+            exit 1
+          fi
+
+          cd "$RUNNER_TEMP"
+          rm -rf "$canary"
+          echo "The scanner detected the planted credential, so its result below is meaningful."
 
       # Scans the full history rather than the working tree, because a credential that was
       # committed and later deleted is still published.
