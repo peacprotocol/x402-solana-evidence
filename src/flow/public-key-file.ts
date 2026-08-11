@@ -17,8 +17,9 @@
  * a key is never guessed at: verifying under a key nobody can describe would report a result about
  * material the reader did not choose.
  */
-import { readFileSync, writeFileSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import { displayKeyPath } from './key-file.ts';
+import { PUBLIC_KEY_FILE_MAX_BYTES, readBoundedFile } from './safe-read.ts';
 
 /** The only algorithm this example issues or verifies under. */
 export const PUBLIC_KEY_ALGORITHM = 'Ed25519';
@@ -104,20 +105,27 @@ export function writeIssuerPublicKeyFile(
  * @throws InvalidPublicKeyFileError for anything that is not a usable Ed25519 public key.
  */
 export function readIssuerPublicKeyFile(path: string): LoadedIssuerPublicKey {
-  let text: string;
-  try {
-    text = readFileSync(path, 'utf8');
-  } catch (e) {
+  // A key file arrives from wherever the evidence did, so it is read the way the evidence is read:
+  // bounded, regular files only, and every refusal named rather than collapsed into "unreadable".
+  const read = readBoundedFile(path, PUBLIC_KEY_FILE_MAX_BYTES);
+  if (read.kind === 'absent') {
+    throw new InvalidPublicKeyFileError(path, 'there is no file at this path');
+  }
+  if (read.kind === 'refused') {
     const reason =
-      (e as NodeJS.ErrnoException).code === 'ENOENT'
-        ? 'there is no file at this path'
-        : `it could not be read (${(e as Error).message.split('\n')[0]})`;
+      read.refusal === 'symbolic_link'
+        ? 'it is a symbolic link, and this reads regular files only'
+        : read.refusal === 'not_a_regular_file'
+          ? `it is not a regular file (${read.detail})`
+          : read.refusal === 'too_large'
+            ? `it is larger than a key file can be (${read.detail})`
+            : `it could not be read (${read.detail})`;
     throw new InvalidPublicKeyFileError(path, reason);
   }
 
   let parsed: unknown;
   try {
-    parsed = JSON.parse(text);
+    parsed = JSON.parse(new TextDecoder().decode(read.bytes));
   } catch (e) {
     throw new InvalidPublicKeyFileError(
       path,

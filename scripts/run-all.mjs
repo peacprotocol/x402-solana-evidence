@@ -50,6 +50,7 @@ const STEPS = [
   },
   { name: 'security, replay, binding and tamper matrix', step: suite('src/test-svm-matrix.ts') },
   { name: 'evidence emission and verification', step: suite('src/test-evidence.ts') },
+  { name: 'hostile inputs to the verifier', step: suite('src/test-verifier-inputs.ts') },
   { name: 'typecheck (primary)', step: { command: process.execPath, args: [TSC, '--noEmit'] } },
   // The compatibility gate stays one script rather than being restated here, so the version it
   // pins and the diagnostics it treats as fatal have a single definition. It spawns node itself.

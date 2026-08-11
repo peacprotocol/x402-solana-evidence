@@ -149,6 +149,23 @@ export const ACCEPTANCE_CASES = {
   'HOSTILE-EV-005': { description: 'an artifact that exists but cannot be read fails, and is never read as absent', scope: 'local' },
 
   /**
+   * The filesystem itself as a hostile input.
+   *
+   * A directory handed over by another party decides how large its files are and what its names
+   * point at. Reading it without bounds trusts both. Each case here is a directory a verifier could
+   * be handed, and the property is the same in all of them: a bounded, named failure, promptly,
+   * rather than a crash, an exhausted process, or a read of something the directory does not
+   * contain.
+   */
+  'FS-BOUND-001': { description: 'a request binding past its size bound is refused before it is read into memory', scope: 'local' },
+  'FS-BOUND-002': { description: 'a chain observation past its size bound is refused before it is read into memory', scope: 'local' },
+  'FS-BOUND-003': { description: 'an origin result body past its size bound is refused before it is read into memory', scope: 'local' },
+  'FS-BOUND-004': { description: 'a symbolic link standing in for a sidecar is refused rather than followed', scope: 'local' },
+  'FS-BOUND-005': { description: 'a symbolic link standing in for a captured field value is refused rather than followed', scope: 'local' },
+  'FS-BOUND-006': { description: 'a symbolic link standing in for the nested artifact directory is refused rather than followed', scope: 'local' },
+  'FS-BOUND-007': { description: 'a path that is not a regular file is refused without being opened or waited on', scope: 'local' },
+
+  /**
    * The material a reviewer needs, produced before anything is spent.
    *
    * A live run that settles a payment and then cannot write the public half of its signing key has

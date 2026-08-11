@@ -334,6 +334,7 @@ pnpm test:preflight              # preflight revalidation and recipient validati
 pnpm test:flow                   # offline end-to-end run and the lifecycle failure branches
 pnpm test:svm                    # security, replay, binding and tamper cases
 pnpm test:evidence               # verifying an evidence directory under a supplied public key
+pnpm test:verifier-inputs        # hostile inputs handed to the verifier: bounds, file types, links
 pnpm typecheck                   # TypeScript 7, primary
 pnpm typecheck:compat            # TypeScript 6, compatibility gate
 pnpm test:acceptance             # every declared acceptance case executed

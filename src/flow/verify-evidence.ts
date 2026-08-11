@@ -25,12 +25,17 @@
  * because reconciling observers would mean choosing which one to believe, and nothing here is in a
  * position to do that.
  */
-import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { verifyLocal, computeJsonDocumentDigestJcs } from '@peac/protocol';
 import type { JsonValue } from '@peac/kernel';
 import { coerceDigest, digestBytes, type Sha256Digest } from '../digest.ts';
 import { checkPresence, EVIDENCE_ARTIFACTS, type EvidenceArtifact } from './presence.ts';
+import {
+  ARTIFACT_CONTAINERS,
+  ARTIFACT_MAX_BYTES,
+  checkContainerDirectory,
+  readBoundedFile,
+} from './safe-read.ts';
 import {
   COMMERCE_GROUP,
   EXPECTED_EVIDENCE_DIR,
@@ -95,18 +100,18 @@ type ArtifactRead =
 /**
  * Read one artifact, without deciding anything about what its state means.
  *
- * Only `ENOENT` is absence. Every other error, including a path that is a directory or one this
- * process may not open, is reported as unreadable: the caller cannot tell those apart from a
- * missing file by looking at the directory, so this refuses to guess on its behalf.
+ * The read is bounded and refuses anything that is not a regular file, because the directory comes
+ * from whoever produced the evidence and a name in it can point at a pipe, a device or somewhere
+ * else entirely. Only `ENOENT` is absence. Every refusal, a symlink, a non-regular file, a file
+ * past its bound, or one this process may not open, is reported as unreadable with its reason: the
+ * caller cannot tell those apart from a missing file by looking at the directory, so this refuses
+ * to guess on its behalf.
  */
 function readArtifact(directory: string, artifact: EvidenceArtifact): ArtifactRead {
-  try {
-    return { kind: 'present', bytes: new Uint8Array(readFileSync(join(directory, artifact))) };
-  } catch (e) {
-    const code = (e as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT') return { kind: 'absent' };
-    return { kind: 'unreadable', reason: code ?? 'unreadable' };
-  }
+  const read = readBoundedFile(join(directory, artifact), ARTIFACT_MAX_BYTES[artifact]);
+  if (read.kind === 'read') return { kind: 'present', bytes: read.bytes };
+  if (read.kind === 'absent') return { kind: 'absent' };
+  return { kind: 'unreadable', reason: `${read.refusal}: ${read.detail}` };
 }
 
 /** What parsing one JSON sidecar produced. Malformed is a result, never an exception. */
@@ -165,6 +170,26 @@ export async function verifyEvidence(
   const checks: VerificationCheck[] = [];
   const warnings: VerificationWarning[] = [];
 
+  // The directories the artifact names descend through, before any of those names is read. A
+  // symlink standing in for one would leave every path below it looking like it names this
+  // evidence directory while the bytes came from somewhere else, so it is refused here rather than
+  // producing a set of individually plausible reads.
+  for (const container of ARTIFACT_CONTAINERS) {
+    const state = checkContainerDirectory(join(directory, container));
+    if (state.kind === 'refused') {
+      return {
+        ok: false,
+        checks: [
+          fail(
+            'nested artifact directories are directories',
+            `${container} was refused (${state.refusal}: ${state.detail})`,
+          ),
+        ],
+        warnings,
+      };
+    }
+  }
+
   // Read every artifact once, before anything is decided. A file that exists but cannot be read is
   // reported as exactly that and stops the run: treating it as absent would let an unreadable
   // directory verify as a smaller, self-consistent one.
@@ -181,7 +206,7 @@ export async function verifyEvidence(
       checks: [
         fail(
           'every artifact is readable',
-          `could not be read, and absence must not be assumed: ${unreadable.join('; ')}`,
+          `refused, and absence must not be assumed: ${unreadable.join('; ')}`,
         ),
       ],
       warnings,
