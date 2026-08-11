@@ -31,6 +31,15 @@ counterparties.
   persisted.
 - Observed field values are size-bounded before anything is decoded or digested.
 
+## Publishing live evidence
+
+Live payment artifacts are private by default. A deliberately public, test-network acceptance
+artifact may be released only when it uses disposable test identities and assets, synthetic
+application data, has completed settlement and is no longer operationally reusable, and passes an
+explicit privacy and secret review. Such an artifact is attached to a release, never committed to
+ordinary Git history. If raw artifacts are withheld, the published set is labelled a redacted
+review subset and does not claim full independent recomputation of every native-artifact digest.
+
 ## Verification boundary
 
 Successful verification establishes that a signed record has not been altered since it was signed,

@@ -1,10 +1,10 @@
-# PEAC Payment Evidence Example
+# x402 Solana Payment Evidence
 
-**Experimental deterministic binding profile, interoperability fixtures and an x402 Solana
-exact-scheme payment-evidence reference flow.**
+Portable, offline-verifiable evidence for x402 v2 `exact` payment flows on Solana, using PEAC
+Protocol records.
 
-Non-normative: it does not extend or modify the PEAC wire format, record registry, extension
-registry or conformance requirements.
+This is a reference implementation and interoperability corpus; it does not modify x402 or the PEAC
+wire format or registries.
 
 This example observes x402 payment field values, validates them in ordered stages using the upstream
 x402 runtime validators, and binds them to the HTTP operation that was requested and to the bytes
@@ -38,6 +38,16 @@ x402 challenge -> SVM exact payment -> origin result -> native settlement artifa
   transaction, each attributed to whoever supplied it and never merged into a single account.
 - A missing or altered artifact fails at a named stage, so a failure says which claim is no longer
   supported instead of condemning the directory as a whole.
+
+## Why this exists
+
+x402 defines the payment interaction, and native payment artifacts remain authoritative for those
+semantics. Operational workflows can additionally need portable evidence tying that interaction to
+the HTTP operation an origin observed, the result bytes it produced, the lifecycle outcome, and
+independently attributed settlement observations.
+
+This repository demonstrates that evidence path without changing x402, introducing an onchain
+program, or replacing payment clients, wallets, facilitators, or Solana payment tooling.
 
 ## Evidence flow
 
