@@ -8,13 +8,16 @@ wire format or registries.
 
 This example observes x402 payment field values, validates them in ordered stages using the upstream
 x402 runtime validators, and binds them to the HTTP operation that was requested and to the bytes
-the origin service produced. It then runs the whole thing: a real express origin behind the real
-x402 payment middleware, a paying client, settlement, a signed PEAC record, and verification of the
-result from the files and a public key alone.
+the origin service produced.
 
-The offline path is deterministic and needs no network, so the committed evidence in
-`fixtures/expected-evidence/` can be verified from a checkout. A live Solana devnet run is a
-documented manual step, not part of continuous integration.
+Two paths run that pipeline. The deterministic path exercises the whole payment lifecycle in
+process: a real express origin behind the real x402 payment middleware, a paying client, and a
+facilitator injected into the run, over synthetic transaction artifacts rather than an onchain
+payment. It needs no network and reproduces byte for byte, so the committed evidence in
+`fixtures/expected-evidence/` can be verified from a checkout, from the files and a public key
+alone. The second path runs the same evidence pipeline against a real payment on Solana Devnet; it
+is a documented manual step, not part of continuous integration, and its live acceptance case is
+pending.
 
 Start with the [walkthrough](docs/WALKTHROUGH.md) for the full command path, the lifecycle state
 machine and the devnet procedure.
@@ -27,8 +30,8 @@ x402 challenge -> SVM exact payment -> origin result -> native settlement artifa
 ```
 
 - x402 v2, scheme `exact`, on SVM, denominated in Solana Devnet USDC.
-- The HTTP operation that was paid for, as RFC 9421 request components the origin observed rather
-  than components rebuilt by re-parsing a URL.
+- The HTTP operation associated with the payment interaction, as RFC 9421 request components the
+  origin observed rather than components rebuilt by re-parsing a URL.
 - The exact bytes the origin produced, covered by digest, so the payment is bound to the work.
 - Native x402 artifacts preserved verbatim and left authoritative for their own claims; this
   example digests and references them rather than reinterpreting them.
@@ -293,6 +296,10 @@ demonstrates and how far each part has actually been exercised.
 | EVM networks | out of scope |
 
 ## Quickstart
+
+Node 24 LTS is the recommended reference runtime; CI also covers Node 22. Corepack is bundled
+through Node 24; on Node 25 or newer, install Corepack separately before using the pinned pnpm
+command below.
 
 ```bash
 corepack pnpm@8.15.0 install --frozen-lockfile

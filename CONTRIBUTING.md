@@ -17,7 +17,10 @@ and the full command path is in the [walkthrough](docs/WALKTHROUGH.md).
 ## Scope
 
 In scope: x402 v2, scheme `exact`, on SVM (Solana); the deterministic offline path; and offline
-verification of an evidence directory from files and a public key alone.
+verification of an evidence directory from files and a public key alone. The manual Solana Devnet
+acceptance path is also in scope: it runs the same evidence pipeline against a real payment and a
+real transaction signature, and it is a documented manual procedure rather than a
+continuous-integration job.
 
 Out of scope: other schemes such as `upto`, EVM and other non-SVM networks, batch settlement,
 streaming responses, mainnet, and MCP carriers. This example also does not extend or modify the

@@ -10,9 +10,10 @@ verification does and does not establish.
 
 ## Prerequisites
 
-- Node 22.13 or newer. Node 24 is what the primary continuous-integration job runs.
-- Corepack, which ships with Node, so the pinned pnpm version is used rather than whatever is
-  installed globally.
+- Node 24 LTS is the recommended reference runtime; CI also covers Node 22.
+- Corepack, so the pinned pnpm version is used rather than whatever is installed globally. Corepack
+  is bundled through Node 24. On Node 25 or newer, install Corepack separately before using the
+  pinned pnpm command.
 
 ```bash
 corepack enable
@@ -338,9 +339,10 @@ runs.
 
 ## Troubleshooting
 
-**No pnpm at all, and none wanted.** Corepack ships with Node, so the pinned version can be used
-without installing or enabling anything. This is the whole path, and it needs no `corepack enable`
-and no shim on `PATH`:
+**No pnpm at all, and none wanted.** Corepack is bundled through Node 24, so on the reference
+runtime the pinned version can be used without installing or enabling anything. This is the whole
+path, and it needs no `corepack enable` and no shim on `PATH`. On Node 25 or newer, install Corepack
+first:
 
 ```bash
 corepack pnpm@8.15.0 install --frozen-lockfile

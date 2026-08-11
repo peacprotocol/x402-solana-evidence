@@ -7,18 +7,24 @@ published. Do not open public issues for vulnerabilities.
 
 ## Key and payment material
 
-This repository must never contain private keys, payment authorizations, or funded-wallet material.
+Private keys, seed phrases and funded-wallet material are never published, in this repository or
+anywhere else. Payment authorizations are never committed either; the single deliberate exception is
+a completed test-network artifact released under
+[Publishing live evidence](#publishing-live-evidence) below, which is attached to a release and
+never enters ordinary Git history.
 
 - **No private keys, seed phrases or signed payment authorizations** in the repository, in its
   history, in test fixtures, in logs, or in a recorded demonstration. Every account identifier in
   the fixtures is fabricated placeholder text and corresponds to no account on any network.
-- **Keys used by future live modes stay outside version control**, under an ignored local
-  directory, with restrictive file permissions. They are never regenerated per run and never
-  printed; only the corresponding public address is ever displayed.
-- **Devnet only.** Any live mode added later targets a development network with valueless test
-  assets. Mainnet funds and real credentials are out of scope, and a change that would require them
-  is a change that stops and asks first.
-- A secret scan runs over the full history in continuous integration.
+- **The live mode's keys stay outside version control**, under an ignored local directory, with
+  restrictive file permissions. The payer and issuer private material is never regenerated per run
+  and never printed; only the corresponding public address and the public verification key are ever
+  displayed.
+- **Devnet only.** The live mode targets Solana Devnet and valueless test assets. Mainnet funds and
+  real credentials are out of scope, and a change that would require them is a change that stops and
+  asks first.
+- A secret scan runs over the full history in continuous integration, and proves it can detect a
+  planted credential before its result on this repository is believed.
 
 ## Handling observed payment artifacts
 
