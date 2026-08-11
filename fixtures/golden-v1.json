@@ -1,0 +1,207 @@
+{
+  "_comment": "Deterministic validation vectors with hard-coded expected bytes and digests. Regenerate via pnpm gen:golden and review the diff.",
+  "profileRequestBinding": "org.peacprotocol.examples.payment-evidence/request-binding/1",
+  "profileOriginResultBinding": "org.peacprotocol.examples.payment-evidence/origin-result-binding/1",
+  "requestBinding": {
+    "profile": "org.peacprotocol.examples.payment-evidence/request-binding/1",
+    "components": {
+      "@method": "GET",
+      "@scheme": "https",
+      "@authority": "api.example.test",
+      "@path": "/v1/forecast",
+      "@query": "?region=alpha&units=metric",
+      "capturePoint": "origin_request_after_http_parsing",
+      "proxyTrustProfile": "direct-origin"
+    },
+    "bodyDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "selectedHeaders": [
+      {
+        "name": "payment-signature",
+        "observedValueDigest": "sha256:92df65d3d46fcd735a53fae0cf9f7f4508b6f97b606026546667a85a4660d338"
+      }
+    ]
+  },
+  "requestBindingJcsUtf8Hex": "7b22626f6479446967657374223a227368613235363a65336230633434323938666331633134396166626634633839393666623932343237616534316534363439623933346361343935393931623738353262383535222c22636f6d706f6e656e7473223a7b2240617574686f72697479223a226170692e6578616d706c652e74657374222c22406d6574686f64223a22474554222c224070617468223a222f76312f666f726563617374222c22407175657279223a223f726567696f6e3d616c70686126756e6974733d6d6574726963222c2240736368656d65223a226874747073222c2263617074757265506f696e74223a226f726967696e5f726571756573745f61667465725f687474705f70617273696e67222c2270726f7879547275737450726f66696c65223a226469726563742d6f726967696e227d2c2270726f66696c65223a226f72672e7065616370726f746f636f6c2e6578616d706c65732e7061796d656e742d65766964656e63652f726571756573742d62696e64696e672f31222c2273656c656374656448656164657273223a5b7b226e616d65223a227061796d656e742d7369676e6174757265222c226f6273657276656456616c7565446967657374223a227368613235363a39326466363564336434366663643733356135336661653063663966376634353038623666393762363036303236353436363637613835613436363064333338227d5d7d",
+  "requestBindingDigest": "sha256:4a94bb31fd8403f2c4a4a3fe05857c017c0f17b8ed4de09a32c9d050fea006d7",
+  "originResultBinding": {
+    "profile": "org.peacprotocol.examples.payment-evidence/origin-result-binding/1",
+    "status": 200,
+    "contentType": "application/json",
+    "bodyDigest": "sha256:5f564269ae83a2ab0cde2d8de9fed2921ffa95e67aa7fa6035884c93bce3087c",
+    "capturePoint": "origin_pre_transfer_encoding"
+  },
+  "originResultBindingJcsUtf8Hex": "7b22626f6479446967657374223a227368613235363a35663536343236396165383361326162306364653264386465396665643239323166666139356536376161376661363033353838346339336263653330383763222c2263617074757265506f696e74223a226f726967696e5f7072655f7472616e736665725f656e636f64696e67222c22636f6e74656e7454797065223a226170706c69636174696f6e2f6a736f6e222c2270726f66696c65223a226f72672e7065616370726f746f636f6c2e6578616d706c65732e7061796d656e742d65766964656e63652f6f726967696e2d726573756c742d62696e64696e672f31222c22737461747573223a3230307d",
+  "originResultBindingDigest": "sha256:ea22f378381de6decceb275b26126380c04475b92f95d92bca6616a048b6a59c",
+  "originResultBodyDigest": "sha256:5f564269ae83a2ab0cde2d8de9fed2921ffa95e67aa7fa6035884c93bce3087c",
+  "requestBodyDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "settleResponseLocalStructuralAuthority": "@x402/core@2.21.0-type-shape",
+  "observedHeaders": {
+    "payment-required": {
+      "name": "payment-required",
+      "artifactType": "PaymentRequired",
+      "observedValue": "eyJ4NDAyVmVyc2lvbiI6MiwicmVzb3VyY2UiOnsidXJsIjoiaHR0cHM6Ly9hcGkuZXhhbXBsZS50ZXN0L3YxL2ZvcmVjYXN0P3JlZ2lvbj1hbHBoYSZ1bml0cz1tZXRyaWMiLCJkZXNjcmlwdGlvbiI6IlN5bnRoZXRpYyBmb3JlY2FzdCByZXNvdXJjZSB1c2VkIGJ5IHRoZSBkZXRlcm1pbmlzdGljIGZpeHR1cmVzIiwibWltZVR5cGUiOiJhcHBsaWNhdGlvbi9qc29uIn0sImFjY2VwdHMiOlt7InNjaGVtZSI6ImV4YWN0IiwibmV0d29yayI6InNvbGFuYTpFdFdUUkFCWmFZcTZpTWZlWUtvdVJ1MTY2VlUyeHFhMSIsImFzc2V0IjoiNHpNTUM5c3J0NVJpNVgxNEdBZ1hoYUhpaTNHblBBRUVSWVBKZ1pKRG5jRFUiLCJhbW91bnQiOiIyNTAwMDAiLCJwYXlUbyI6IlN5bnRoZXRpY1JlY2lwaWVudDExMTExMTExMTExMTExMTExMTExMTExMTExIiwibWF4VGltZW91dFNlY29uZHMiOjYwLCJleHRyYSI6eyJmZWVQYXllciI6IlN5bnRoZXRpY0ZlZVBheWVyMTExMTExMTExMTExMTExMTExMTExMTExMTEiLCJyZWNlbnRCbG9ja2hhc2giOiJTeW50aGV0aWNCbG9ja2hhc2gxMTExMTExMTExMTExMTExMTExMTExMTExMTEifX1dLCJleHRlbnNpb25zIjp7InBheW1lbnQtaWRlbnRpZmllciI6eyJpbmZvIjp7InJlcXVpcmVkIjp0cnVlfSwic2NoZW1hIjp7IiRzY2hlbWEiOiJodHRwczovL2pzb24tc2NoZW1hLm9yZy9kcmFmdC8yMDIwLTEyL3NjaGVtYSIsInR5cGUiOiJvYmplY3QiLCJwcm9wZXJ0aWVzIjp7InJlcXVpcmVkIjp7InR5cGUiOiJib29sZWFuIn0sImlkIjp7InR5cGUiOiJzdHJpbmciLCJtaW5MZW5ndGgiOjE2LCJtYXhMZW5ndGgiOjEyOCwicGF0dGVybiI6Il5bYS16QS1aMC05Xy1dKyQifX0sInJlcXVpcmVkIjpbInJlcXVpcmVkIl19fX19",
+      "observedValueDigest": "sha256:a8ca2fe26731856845b523aba50c67cd21729306f7bf25b902da9bf23d091291",
+      "stages": {
+        "transport": "accepted",
+        "json": "accepted",
+        "duplicate-members": "accepted",
+        "upstream-schema": "accepted",
+        "scheme-payload": "not_evaluated",
+        "extensions": "not_evaluated"
+      },
+      "diagnostics": [],
+      "upstreamSchemaAuthority": "@x402/core@2.21.0/schemas",
+      "capturePoint": "client_response_after_http_parsing",
+      "httpVersion": "2.0",
+      "decodedPayloadDigest": "sha256:4435742cea8154264dde74baaeac1a1c0cfb9995a776057683999af018aaacb8",
+      "decoded": {
+        "x402Version": 2,
+        "resource": {
+          "url": "https://api.example.test/v1/forecast?region=alpha&units=metric",
+          "description": "Synthetic forecast resource used by the deterministic fixtures",
+          "mimeType": "application/json"
+        },
+        "accepts": [
+          {
+            "scheme": "exact",
+            "network": "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
+            "asset": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+            "amount": "250000",
+            "payTo": "SyntheticRecipient11111111111111111111111111",
+            "maxTimeoutSeconds": 60,
+            "extra": {
+              "feePayer": "SyntheticFeePayer11111111111111111111111111",
+              "recentBlockhash": "SyntheticBlockhash111111111111111111111111111"
+            }
+          }
+        ],
+        "extensions": {
+          "payment-identifier": {
+            "info": {
+              "required": true
+            },
+            "schema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "required": {
+                  "type": "boolean"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 16,
+                  "maxLength": 128,
+                  "pattern": "^[a-zA-Z0-9_-]+$"
+                }
+              },
+              "required": [
+                "required"
+              ]
+            }
+          }
+        }
+      },
+      "validatedObjectJcsDigest": "sha256:757e9e46bbbd0d6dfb7dc6f96a832322a1d267c85d28281df89f74535f2114ca"
+    },
+    "payment-signature": {
+      "name": "payment-signature",
+      "artifactType": "PaymentPayload",
+      "observedValue": "eyJ4NDAyVmVyc2lvbiI6MiwicmVzb3VyY2UiOnsidXJsIjoiaHR0cHM6Ly9hcGkuZXhhbXBsZS50ZXN0L3YxL2ZvcmVjYXN0P3JlZ2lvbj1hbHBoYSZ1bml0cz1tZXRyaWMiLCJkZXNjcmlwdGlvbiI6IlN5bnRoZXRpYyBmb3JlY2FzdCByZXNvdXJjZSB1c2VkIGJ5IHRoZSBkZXRlcm1pbmlzdGljIGZpeHR1cmVzIiwibWltZVR5cGUiOiJhcHBsaWNhdGlvbi9qc29uIn0sImFjY2VwdGVkIjp7InNjaGVtZSI6ImV4YWN0IiwibmV0d29yayI6InNvbGFuYTpFdFdUUkFCWmFZcTZpTWZlWUtvdVJ1MTY2VlUyeHFhMSIsImFzc2V0IjoiNHpNTUM5c3J0NVJpNVgxNEdBZ1hoYUhpaTNHblBBRUVSWVBKZ1pKRG5jRFUiLCJhbW91bnQiOiIyNTAwMDAiLCJwYXlUbyI6IlN5bnRoZXRpY1JlY2lwaWVudDExMTExMTExMTExMTExMTExMTExMTExMTExIiwibWF4VGltZW91dFNlY29uZHMiOjYwLCJleHRyYSI6eyJmZWVQYXllciI6IlN5bnRoZXRpY0ZlZVBheWVyMTExMTExMTExMTExMTExMTExMTExMTExMTEiLCJyZWNlbnRCbG9ja2hhc2giOiJTeW50aGV0aWNCbG9ja2hhc2gxMTExMTExMTExMTExMTExMTExMTExMTExMTEifX0sInBheWxvYWQiOnsidHJhbnNhY3Rpb24iOiJjM2x1ZEdobGRHbGpMWEJzWVdObGFHOXNaR1Z5TFc1dmRDMWhMWE52YkdGdVlTMTBjbUZ1YzJGamRHbHZiZz09In0sImV4dGVuc2lvbnMiOnsicGF5bWVudC1pZGVudGlmaWVyIjp7ImluZm8iOnsicmVxdWlyZWQiOnRydWUsImlkIjoicGF5XzAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDBmMXgyIn0sInNjaGVtYSI6eyIkc2NoZW1hIjoiaHR0cHM6Ly9qc29uLXNjaGVtYS5vcmcvZHJhZnQvMjAyMC0xMi9zY2hlbWEiLCJ0eXBlIjoib2JqZWN0IiwicHJvcGVydGllcyI6eyJyZXF1aXJlZCI6eyJ0eXBlIjoiYm9vbGVhbiJ9LCJpZCI6eyJ0eXBlIjoic3RyaW5nIiwibWluTGVuZ3RoIjoxNiwibWF4TGVuZ3RoIjoxMjgsInBhdHRlcm4iOiJeW2EtekEtWjAtOV8tXSskIn19LCJyZXF1aXJlZCI6WyJyZXF1aXJlZCJdfX19fQ==",
+      "observedValueDigest": "sha256:92df65d3d46fcd735a53fae0cf9f7f4508b6f97b606026546667a85a4660d338",
+      "stages": {
+        "transport": "accepted",
+        "json": "accepted",
+        "duplicate-members": "accepted",
+        "upstream-schema": "accepted",
+        "scheme-payload": "accepted",
+        "extensions": "accepted"
+      },
+      "diagnostics": [],
+      "upstreamSchemaAuthority": "@x402/core@2.21.0/schemas",
+      "capturePoint": "origin_request_after_http_parsing",
+      "httpVersion": "2.0",
+      "decodedPayloadDigest": "sha256:b1e2dec9ec597d48c5213737e85330f3b3d32696fece4677f598b341c09d03ff",
+      "decoded": {
+        "x402Version": 2,
+        "resource": {
+          "url": "https://api.example.test/v1/forecast?region=alpha&units=metric",
+          "description": "Synthetic forecast resource used by the deterministic fixtures",
+          "mimeType": "application/json"
+        },
+        "accepted": {
+          "scheme": "exact",
+          "network": "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
+          "asset": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+          "amount": "250000",
+          "payTo": "SyntheticRecipient11111111111111111111111111",
+          "maxTimeoutSeconds": 60,
+          "extra": {
+            "feePayer": "SyntheticFeePayer11111111111111111111111111",
+            "recentBlockhash": "SyntheticBlockhash111111111111111111111111111"
+          }
+        },
+        "payload": {
+          "transaction": "c3ludGhldGljLXBsYWNlaG9sZGVyLW5vdC1hLXNvbGFuYS10cmFuc2FjdGlvbg=="
+        },
+        "extensions": {
+          "payment-identifier": {
+            "info": {
+              "required": true,
+              "id": "pay_0000000000000000000000000000f1x2"
+            },
+            "schema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "required": {
+                  "type": "boolean"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 16,
+                  "maxLength": 128,
+                  "pattern": "^[a-zA-Z0-9_-]+$"
+                }
+              },
+              "required": [
+                "required"
+              ]
+            }
+          }
+        }
+      },
+      "validatedObjectJcsDigest": "sha256:f260bb5cb89874193490ec3f76809f7f210da7fb737e0247b97cefb24d6c80f1"
+    },
+    "payment-response": {
+      "name": "payment-response",
+      "artifactType": "SettleResponse",
+      "observedValue": "eyJzdWNjZXNzIjp0cnVlLCJ0cmFuc2FjdGlvbiI6IlN5bnRoZXRpY1R4U2lnMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMSIsIm5ldHdvcmsiOiJzb2xhbmE6RXRXVFJBQlphWXE2aU1mZVlLb3VSdTE2NlZVMnhxYTEiLCJwYXllciI6IlN5bnRoZXRpY1BheWVyMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExIn0=",
+      "observedValueDigest": "sha256:df8ca9822e5c33468e28ee6b01da790572c8ed35b7f160c812c812a8115eb72e",
+      "stages": {
+        "transport": "accepted",
+        "json": "accepted",
+        "duplicate-members": "accepted",
+        "upstream-schema": "not_evaluated",
+        "scheme-payload": "not_evaluated",
+        "extensions": "not_evaluated"
+      },
+      "diagnostics": [],
+      "upstreamSchemaAuthority": "@x402/core@2.21.0/schemas",
+      "capturePoint": "origin_response_before_gateway",
+      "httpVersion": "2.0",
+      "localStructural": {
+        "upstreamSchemaStatus": "not_evaluated",
+        "localStructuralStatus": "accepted",
+        "localStructuralAuthority": "@x402/core@2.21.0-type-shape"
+      },
+      "decodedPayloadDigest": "sha256:7a227ee346f73f3aa98e375c23d5af77d0f1d8c3073f8e8384eaad0a62c55923",
+      "decoded": {
+        "success": true,
+        "transaction": "SyntheticTxSig1111111111111111111111111111111111111111111111111111111111111111111111",
+        "network": "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
+        "payer": "SyntheticPayer111111111111111111111111111111"
+      },
+      "validatedObjectJcsDigest": "sha256:7c5c2f8d9a660f0979724f650c31914cb9c21f747e84a6b8bcd5c52c03292a39"
+    }
+  }
+}

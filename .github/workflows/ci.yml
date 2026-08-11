@@ -1,0 +1,245 @@
+name: ci
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+# Least privilege: nothing in this workflow writes to the repository, and no secrets are used,
+# so a fork pull request has exactly the same capabilities as a branch push.
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: verify (node ${{ matrix.node }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22', '24']
+    steps:
+      # Actions are pinned to immutable commit SHAs. A tag can be moved; a SHA cannot.
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node }}
+          # Dependencies are installed from the committed lockfile on every run, so there is
+          # nothing to gain from cache detection and one less thing to go wrong.
+          package-manager-cache: false
+
+      - name: Enable pnpm from the packageManager pin
+        run: corepack enable
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # One entry point, the same one the walkthrough documents, so continuous integration cannot
+      # drift into running a different set of suites than a reader does. It runs every suite, both
+      # typechecks and the acceptance-completeness gate in order, and stops at the first failure.
+      # Everything it runs is deterministic and loopback-only: origins are started in-process,
+      # altered payments are presented to them, and evidence is edited in temporary directories.
+      - name: Test suite
+        run: pnpm test
+
+      # The committed evidence is verified from the directory and a public key alone, which is the
+      # position a reader of this repository is in.
+      - name: Verify the committed offline evidence
+        run: pnpm verify
+
+      # The demonstration exits non-zero if an edited copy verifies, so this also guards the
+      # verifier against silently accepting a tampered directory.
+      - name: Tamper demonstration
+        run: pnpm tamper-demo
+
+      # Exercises the egress diagnostics themselves. They are an early warning on a developer
+      # machine, not the offline gate; the offline job below is what actually proves it.
+      - name: Fixture path with egress diagnostics
+        run: pnpm demo:offline
+
+      # FOUND-DET-001: the binding walkthrough must be byte-identical run to run, or the
+      # committed vectors describe something that cannot be reproduced.
+      - name: Binding walkthrough determinism
+        run: |
+          pnpm demo:binding > /tmp/binding-run-1.txt
+          pnpm demo:binding > /tmp/binding-run-2.txt
+          diff /tmp/binding-run-1.txt /tmp/binding-run-2.txt
+
+      # SVM-DET-001: the end-to-end run rewrites the committed evidence in place, so a difference
+      # from what is committed is a determinism failure. Comparing against the repository rather
+      # than against a second run also catches evidence committed from a different tree.
+      - name: Offline evidence determinism
+        run: |
+          pnpm demo:fixture > /dev/null
+          git diff --exit-code -- fixtures/expected-evidence
+
+  offline:
+    name: offline path (no network)
+    runs-on: ubuntu-24.04
+    env:
+      # The runtime for the no-network gate, pinned by digest for the same reason the actions above
+      # are pinned by commit SHA: a tag can be repointed, a digest cannot. This is the multi-platform
+      # index digest of the node:24 tag, which is Node 24.19.0 at the time of pinning.
+      OFFLINE_NODE_IMAGE: 'node:24@sha256:934240a162082fd8b8a2f90cd5114446443f1eba1c5378f6687167ca405e6584'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - name: Enable pnpm from the packageManager pin
+        run: corepack enable
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # FOUND-NET-001: the authoritative offline gate. Dependencies are installed first, then the
+      # fixture path runs in a container with no network interface at all, so a claim that the
+      # offline path needs no network is proven by the environment rather than by instrumentation.
+      # Plain node runs the sources directly, so the gate depends on no build step of its own.
+      - name: Binding walkthrough with networking disabled
+        run: |
+          docker run --rm --network=none \
+            -v "$PWD:/work" -w /work \
+            "$OFFLINE_NODE_IMAGE" \
+            node src/fixture-demo.ts
+
+      # The end-to-end flow serves and consumes the paid resource over the loopback interface,
+      # which exists inside a container with no network interface. Passing here is what shows that
+      # the injected facilitator and the wallet stand-in reach nothing outside the process.
+      - name: Offline end-to-end flow with networking disabled
+        run: |
+          docker run --rm --network=none \
+            -v "$PWD:/work" -w /work \
+            "$OFFLINE_NODE_IMAGE" \
+            node src/flow/fixture-e2e.ts
+
+  secret-scan:
+    name: secret scan
+    runs-on: ubuntu-24.04
+    env:
+      # The upstream action is deliberately not used. It requires a license key for repositories
+      # owned by an organization, and this workflow uses no secrets at all so that a fork pull
+      # request runs exactly what a branch push runs. The open source binary needs neither.
+      GITLEAKS_VERSION: '8.30.1'
+      # Published checksum for gitleaks_8.30.1_linux_x64.tar.gz. A pinned version says which
+      # release was intended; the checksum is what proves the bytes that ran are that release.
+      GITLEAKS_SHA256: '551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Scanning history requires the history.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install gitleaks
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          curl -sSfL -o gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  gitleaks.tar.gz" | sha256sum -c -
+          tar xzf gitleaks.tar.gz gitleaks
+          ./gitleaks version
+
+      # The scan below reports either findings or silence, and silence is the answer this job
+      # almost always gives. Silence from an engine that was never shown to speak is worth nothing,
+      # so the engine is made to detect something before its quiet on this repository is believed.
+      #
+      # A throwaway repository holding one wholly synthetic credential is scanned with the exact
+      # binary downloaded above, under the default rules, and detection is required twice over: by
+      # exit status, and by the identity of the rule that fired. A misconfigured, truncated or
+      # silently failing binary fails here rather than passing this job with an empty report.
+      #
+      # The canary value is assembled at run time from two halves. Written whole it would be a real
+      # match for the default rule set, and the history scan below reads this workflow file too.
+      - name: Prove the scanner detects before trusting it
+        env:
+          CANARY_PREFIX: 'AKIA'
+          CANARY_BODY: 'QYLPMN5HHFTRW6ZA'
+        run: |
+          set -euo pipefail
+          canary="$RUNNER_TEMP/scanner-canary"
+          rm -rf "$canary"
+          mkdir -p "$canary"
+          cd "$canary"
+          git init -q -b main .
+          git config user.name 'Scanner Canary'
+          git config user.email 'canary@example.invalid'
+          printf 'aws_access_key_id = %s%s\n' "$CANARY_PREFIX" "$CANARY_BODY" > credentials.txt
+          git add credentials.txt
+          git commit -qm 'Synthetic credential for scanner self-test'
+
+          set +e
+          "$RUNNER_TEMP/gitleaks" git . \
+            --no-banner --no-color --redact \
+            --report-format json --report-path "$canary/report.json"
+          detected=$?
+          set -e
+
+          if [ "$detected" -eq 0 ]; then
+            echo "The scanner found nothing in a repository where a credential was planted."
+            echo "Its verdict on this repository's history would mean nothing, so this job fails."
+            exit 1
+          fi
+
+          if ! grep -q '"RuleID": *"aws-access-token"' "$canary/report.json"; then
+            echo "The scanner reported findings but not the expected rule, so it did not detect"
+            echo "the planted credential and its rule set is not what this job assumes."
+            cat "$canary/report.json"
+            exit 1
+          fi
+
+          cd "$RUNNER_TEMP"
+          rm -rf "$canary"
+          echo "The scanner detected the planted credential, so its result below is meaningful."
+
+      # Scans the full history rather than the working tree, because a credential that was
+      # committed and later deleted is still published.
+      #
+      # The result is checked rather than trusted. Upstream gitleaks aborts the scan when git
+      # writes anything to stderr, and that path can still report "no leaks found" and exit 0;
+      # a repository whose history really does contain a secret then passes silently. The two
+      # assertions below turn that outcome into a failure, so this job either scans the history
+      # or fails, and never quietly reports success without having looked.
+      - name: Scan history for committed secrets
+        run: |
+          set -uo pipefail
+          set +e
+          "$RUNNER_TEMP/gitleaks" git . \
+            --config .gitleaks.toml \
+            --no-banner --no-color --redact \
+            --report-format json --report-path "$RUNNER_TEMP/gitleaks-report.json" 2>&1 \
+            | tee "$RUNNER_TEMP/scan.log"
+          status=${PIPESTATUS[0]}
+          set -e
+
+          if grep -q 'stderr is not empty' "$RUNNER_TEMP/scan.log"; then
+            echo "The scan aborted on git stderr output, so its result means nothing."
+            exit 1
+          fi
+
+          commits="$(sed -n 's/.*INF \([0-9][0-9]*\) commits scanned.*/\1/p' "$RUNNER_TEMP/scan.log" | tail -1)"
+          if [ -z "$commits" ] || [ "$commits" -eq 0 ]; then
+            echo "The scan walked no commits, so it proves nothing about this history."
+            exit 1
+          fi
+
+          if [ "$status" -ne 0 ]; then
+            echo "Secret scan reported findings across $commits commits."
+            exit "$status"
+          fi
+
+          echo "No findings across $commits commits."

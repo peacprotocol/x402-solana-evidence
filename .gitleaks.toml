@@ -1,0 +1,19 @@
+# Secret-scanning configuration.
+#
+# The default rule set is used in full. The single allowlist below is scoped to one rule and one
+# path, because the generic "jwt" rule matches the shape of a compact JWS (three base64url
+# segments) and this repository publishes exactly one such file on purpose.
+#
+# fixtures/expected-evidence/record.jws is the committed evidence record. It is public
+# verification material: an Ed25519 signature over a public payload, which a reader is expected to
+# verify offline with the published public key. It contains no private key and no credential.
+# Suppressing the rule for that one path keeps the scan honest everywhere else; a credential
+# committed anywhere in this repository, including elsewhere under fixtures/, is still reported.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Committed evidence record: a signed public artifact, not a credential."
+targetRules = ["jwt"]
+paths = ['''^fixtures/expected-evidence/record\.jws$''']

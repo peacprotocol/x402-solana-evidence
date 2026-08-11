@@ -1,11 +1,63 @@
 {
-  "name": "peac-payment-evidence-example",
+  "name": "x402-solana-evidence",
   "version": "0.1.0",
   "private": true,
-  "description": "Reference example: portable payment evidence for x402 interactions using PEAC records.",
+  "type": "module",
+  "description": "Reference implementation for portable, offline-verifiable evidence around x402 v2 SVM exact payment flows on Solana.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/peacprotocol/x402-solana-evidence.git"
+  },
+  "homepage": "https://peacprotocol.org/examples/x402/solana",
+  "bugs": {
+    "url": "https://github.com/peacprotocol/x402-solana-evidence/issues"
+  },
   "license": "Apache-2.0",
   "engines": {
     "node": ">=22.13.0"
   },
-  "packageManager": "pnpm@8.15.0"
+  "packageManager": "pnpm@8.15.0",
+  "scripts": {
+    "fixture": "tsx src/fixture-demo.ts",
+    "demo:binding": "tsx src/fixture-demo.ts",
+    "demo:fixture": "tsx src/flow/fixture-e2e.ts",
+    "demo:devnet:prepare": "tsx src/flow/preflight.ts",
+    "demo:devnet": "tsx src/flow/devnet-demo.ts",
+    "demo:offline": "tsx src/fixture-demo-offline.ts",
+    "verify": "tsx src/flow/verify-evidence.ts",
+    "tamper-demo": "tsx src/flow/tamper-demo.ts",
+    "test": "node scripts/run-all.mjs",
+    "test:imports": "tsx src/imports-smoke.ts",
+    "test:keys": "tsx src/test-keys.ts",
+    "test:preflight": "tsx src/test-preflight.ts",
+    "test:golden": "tsx src/test-golden.ts",
+    "test:negative": "tsx src/test-negative.ts",
+    "test:flow": "tsx src/flow/fixture-e2e.ts",
+    "test:svm": "tsx src/test-svm-matrix.ts",
+    "test:evidence": "tsx src/test-evidence.ts",
+    "test:acceptance": "tsx src/test-acceptance.ts",
+    "gen:golden": "tsx src/gen-golden.ts",
+    "typecheck": "tsc --noEmit",
+    "typecheck:compat": "./run-ts-compat.sh"
+  },
+  "dependencies": {
+    "@peac/crypto": "0.16.4",
+    "@peac/kernel": "0.16.4",
+    "@peac/protocol": "0.16.4",
+    "@peac/schema": "0.16.4",
+    "@solana/kit": "5.5.1",
+    "@x402/core": "2.21.0",
+    "@x402/express": "2.21.0",
+    "@x402/extensions": "2.21.0",
+    "@x402/svm": "2.21.0",
+    "express": "5.2.1"
+  },
+  "devDependencies": {
+    "@types/express": "5.0.6",
+    "@types/node": "24.13.3",
+    "@typescript/typescript6": "6.0.2",
+    "ajv": "8.20.0",
+    "tsx": "4.23.12",
+    "typescript": "7.0.2"
+  }
 }

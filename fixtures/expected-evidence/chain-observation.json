@@ -1,0 +1,20 @@
+{
+  "profile": "org.peacprotocol.examples.payment-evidence/solana-chain-observation/1",
+  "network": "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
+  "scheme": "exact",
+  "asset": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+  "amountBaseUnits": "250000",
+  "assetDecimals": 6,
+  "recipient": "SyntheticRecipient11111111111111111111111111",
+  "payer": "SyntheticPayer111111111111111111111111111111",
+  "transactionSignature": "SyntheticTxSig1111111111111111111111111111111111111111111111111111111111111111111111",
+  "observationSource": {
+    "kind": "in_process_fixture",
+    "reference": "offline run, no facilitator and no node were contacted"
+  },
+  "settlementResponseDigest": "sha256:df8ca9822e5c33468e28ee6b01da790572c8ed35b7f160c812c812a8115eb72e",
+  "serviceResultDigest": "sha256:5f564269ae83a2ab0cde2d8de9fed2921ffa95e67aa7fa6035884c93bce3087c",
+  "observedAtUnixSeconds": 1785000000,
+  "terminalState": "response_write_attempted",
+  "settlementOutcome": "succeeded"
+}
