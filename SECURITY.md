@@ -2,8 +2,8 @@
 
 ## Reporting a vulnerability
 
-Report suspected vulnerabilities privately via GitHub security advisories once this repository is
-published. Do not open public issues for vulnerabilities.
+Report suspected vulnerabilities through GitHub private vulnerability reporting. Do not open
+public issues for suspected vulnerabilities.
 
 ## Key and payment material
 
