@@ -18,15 +18,29 @@
  * exercised. Nothing here opens a connection.
  */
 import { execFileSync } from 'node:child_process';
-import { cpSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beginAcceptanceSuite, recordExecution } from './acceptance-ids.ts';
 import { LIMITS } from './binding.ts';
+import { DUPLICATE_SCAN_LIMITS } from './strict-json.ts';
 import { X402_LIMITS } from './x402-header.ts';
 import { EXPECTED_EVIDENCE_DIR } from './flow/issue-record.ts';
 import { resolveIssuerKey } from './flow/issuer-key.ts';
 import { EVIDENCE_ARTIFACTS } from './flow/presence.ts';
+import {
+  InvalidPublicKeyFileError,
+  readIssuerPublicKeyFile,
+  writeIssuerPublicKeyFile,
+} from './flow/public-key-file.ts';
 import {
   ARTIFACT_CONTAINERS,
   ARTIFACT_MAX_BYTES,
@@ -324,6 +338,230 @@ recordExecution('FS-BOUND-007');
     `${verdict.elapsedMs}ms`,
   );
   rmSync(directory, { recursive: true, force: true });
+}
+
+// ---------------------------------------------------------------------------------------------
+// What may be admitted as a document, before anything is canonicalized.
+// ---------------------------------------------------------------------------------------------
+
+console.log('\nDocuments that parse, and are still not admissible\n');
+
+/**
+ * The same document, with its first member repeated verbatim.
+ *
+ * The repetition carries the identical value, so `JSON.parse` produces exactly the object the
+ * original file describes and canonicalizing it would recompute exactly the digest the record
+ * binds. That is what makes these cases worth writing: nothing about the value explains the
+ * refusal, so a case that fails proves the duplicate rule ran, and a verifier without that rule
+ * would report the directory as verified.
+ *
+ * @param escapeName - Write the repeated name with its first character as a `\\u` escape, so the
+ *   two names are the same member only after escape decoding, and a scanner comparing source text
+ *   would see two different members.
+ */
+function repeatFirstMember(text: string, escapeName: boolean): string {
+  const document = JSON.parse(text) as Record<string, unknown>;
+  const first = Object.keys(document)[0]!;
+  const name = escapeName
+    ? `"\\u${first.charCodeAt(0).toString(16).padStart(4, '0')}${first.slice(1)}"`
+    : JSON.stringify(first);
+  return `{${name}:${JSON.stringify(document[first])},${JSON.stringify(document).slice(1)}`;
+}
+
+/** The same document, with the first member of one nested object repeated verbatim. */
+function repeatNestedMember(text: string, container: string): string {
+  const document = JSON.parse(text) as Record<string, unknown>;
+  const inner = document[container] as Record<string, unknown>;
+  const first = Object.keys(inner)[0]!;
+  const repeated = `${JSON.stringify(first)}:${JSON.stringify(inner[first])}`;
+  const innerText = `{${repeated},${JSON.stringify(inner).slice(1)}`;
+  const members = Object.entries(document).map(
+    ([key, value]) =>
+      `${JSON.stringify(key)}:${key === container ? innerText : JSON.stringify(value)}`,
+  );
+  return `{${members.join(',')}}`;
+}
+
+/**
+ * One inadmissible-document case.
+ *
+ * The last assertion is the one that matters most: the failing check must not carry a recomputed
+ * digest. A report that named a digest would mean the document reached canonicalization before
+ * anything refused it, which is the exact ordering these rules exist to guarantee.
+ */
+async function strictCase(input: {
+  readonly label: string;
+  readonly artifact: string;
+  readonly contents: string | Uint8Array;
+  readonly expectCheck: string;
+  readonly expectRefusal: string;
+}): Promise<void> {
+  const directory = hostileCopy();
+  try {
+    writeFileSync(join(directory, input.artifact), input.contents);
+    const verdict = await verdictFor(directory);
+    check(
+      `${input.label}: verification returns a verdict rather than throwing`,
+      verdict.thrown === undefined,
+      verdict.thrown ?? '',
+    );
+    check(`${input.label}: the verdict is a failure`, verdict.report?.ok === false);
+    const failing = verdict.report?.checks.find((c) => c.name === input.expectCheck && !c.ok);
+    check(
+      `${input.label}: the failure is reported as "${input.expectCheck}"`,
+      failing !== undefined,
+      failedNames(verdict.report),
+    );
+    check(
+      `${input.label}: the refusal names ${input.expectRefusal}`,
+      failing?.detail.includes(input.expectRefusal) === true,
+      failing?.detail ?? failedNames(verdict.report),
+    );
+    check(
+      `${input.label}: nothing was canonicalized, so no digest was recomputed over it`,
+      failing?.detail.includes('recomputed') === false &&
+        failing?.detail.includes('sha256:') === false,
+      failing?.detail ?? '',
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+/** The committed evidence, untouched. The control every case below is measured against. */
+{
+  const directory = hostileCopy();
+  const verdict = await verdictFor(directory);
+  check(
+    'the committed evidence verifies before any of it is rewritten',
+    verdict.report?.ok === true,
+    failedNames(verdict.report),
+  );
+  rmSync(directory, { recursive: true, force: true });
+}
+
+const observationText = readFileSync(join(EXPECTED_EVIDENCE_DIR, 'chain-observation.json'), 'utf8');
+const resultBindingText = readFileSync(
+  join(EXPECTED_EVIDENCE_DIR, 'origin-result-binding.json'),
+  'utf8',
+);
+const requestBindingText = readFileSync(
+  join(EXPECTED_EVIDENCE_DIR, 'request-binding.json'),
+  'utf8',
+);
+
+/** STRICT-EV-001. Two members of one object, and no way to say which value the digest covers. */
+recordExecution('STRICT-EV-001');
+await strictCase({
+  label: 'a chain observation with a repeated member',
+  artifact: 'chain-observation.json',
+  contents: repeatFirstMember(observationText, false),
+  expectCheck: 'chain observation digest',
+  expectRefusal: 'duplicate_member',
+});
+
+/**
+ * STRICT-EV-002. The same collision, written so that only a decoding scanner sees it.
+ *
+ * A scanner comparing raw source spans would find two different names here and admit the document.
+ */
+recordExecution('STRICT-EV-002');
+await strictCase({
+  label: 'a result binding whose repeated member name is escaped',
+  artifact: 'origin-result-binding.json',
+  contents: repeatFirstMember(resultBindingText, true),
+  expectCheck: 'origin result binding digest',
+  expectRefusal: 'duplicate_member',
+});
+
+/**
+ * STRICT-EV-003. Bytes that are not text.
+ *
+ * The default decoder substitutes U+FFFD for what it cannot decode, which would produce a document
+ * the file does not contain and then digest it. Refused instead.
+ */
+recordExecution('STRICT-EV-003');
+await strictCase({
+  label: 'a request binding carrying invalid UTF-8',
+  artifact: 'request-binding.json',
+  contents: Buffer.concat([
+    Buffer.from('{"profile":"'),
+    Buffer.from([0xff, 0xfe]),
+    Buffer.from('"}'),
+  ]),
+  expectCheck: 'request binding digest',
+  expectRefusal: 'invalid_utf8',
+});
+
+/** STRICT-EV-004. The same ambiguity, one level down, where a shallow check would miss it. */
+recordExecution('STRICT-EV-004');
+await strictCase({
+  label: 'a request binding with a repeated member inside a nested object',
+  artifact: 'request-binding.json',
+  contents: repeatNestedMember(requestBindingText, 'components'),
+  expectCheck: 'request binding digest',
+  expectRefusal: 'duplicate_member',
+});
+
+/**
+ * STRICT-EV-005. Nesting past what the scanner will descend.
+ *
+ * The scanner fails closed rather than admitting the part it managed to read: a document it stopped
+ * scanning is a document it cannot say is unambiguous.
+ */
+recordExecution('STRICT-EV-005');
+{
+  const depth = DUPLICATE_SCAN_LIMITS.maxDepth + 2;
+  await strictCase({
+    label: 'a chain observation nested past the scanner bound',
+    artifact: 'chain-observation.json',
+    contents: `${'{"a":'.repeat(depth)}1${'}'.repeat(depth)}`,
+    expectCheck: 'chain observation digest',
+    expectRefusal: 'depth_limit_exceeded',
+  });
+}
+
+/**
+ * STRICT-EV-006. The supplied key file, held to the same rule.
+ *
+ * A key file with two members of the same name names two different keys depending on which parser
+ * reads it, and the whole verification is performed under whichever one this process chose. The
+ * control below is the same file without the repetition, so the refusal cannot be explained by
+ * anything else about it.
+ */
+recordExecution('STRICT-EV-006');
+{
+  const keyDirectory = mkdtempSync(join(tmpdir(), 'peac-evidence-key-'));
+  const original = join(keyDirectory, 'issuer.pub.json');
+  writeIssuerPublicKeyFile(original, fixtureKey);
+  const originalText = readFileSync(original, 'utf8');
+
+  const repeated = join(keyDirectory, 'repeated.pub.json');
+  writeFileSync(repeated, repeatFirstMember(originalText, false));
+
+  let refusal: string | undefined;
+  try {
+    readIssuerPublicKeyFile(repeated);
+  } catch (e) {
+    refusal = e instanceof InvalidPublicKeyFileError ? e.reason : `unexpected ${String(e)}`;
+  }
+  check(
+    'a key file with a repeated member is refused',
+    refusal !== undefined,
+    'it was accepted, and the key used depended on the parser',
+  );
+  check(
+    'and the reason says the same member is declared twice',
+    refusal?.includes('same member twice') === true,
+    refusal ?? '',
+  );
+  check(
+    'while the same file without the repetition loads the expected key',
+    Buffer.from(readIssuerPublicKeyFile(original).publicKey).equals(
+      Buffer.from(fixtureKey.publicKey),
+    ),
+  );
+  rmSync(keyDirectory, { recursive: true, force: true });
 }
 
 for (const directory of linkTargets) rmSync(directory, { recursive: true, force: true });

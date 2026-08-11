@@ -29,6 +29,7 @@ import { join } from 'node:path';
 import { verifyLocal, computeJsonDocumentDigestJcs } from '@peac/protocol';
 import type { JsonValue } from '@peac/kernel';
 import { coerceDigest, digestBytes, type Sha256Digest } from '../digest.ts';
+import { decodeStrictUtf8, parseStrictJson, type StrictJsonRefusal } from '../strict-json.ts';
 import { checkPresence, EVIDENCE_ARTIFACTS, type EvidenceArtifact } from './presence.ts';
 import {
   ARTIFACT_CONTAINERS,
@@ -114,10 +115,17 @@ function readArtifact(directory: string, artifact: EvidenceArtifact): ArtifactRe
   return { kind: 'unreadable', reason: `${read.refusal}: ${read.detail}` };
 }
 
-/** What parsing one JSON sidecar produced. Malformed is a result, never an exception. */
+/**
+ * What admitting one JSON sidecar produced. Refusal is a result, never an exception.
+ *
+ * A refused document carries which rule refused it, because "not readable as JSON" covers bytes
+ * that are not text, an object whose members are ambiguous, nesting past the scanner's bound and
+ * ordinary syntax damage, and a reader deciding whether a directory was tampered with or merely
+ * corrupted needs to know which one happened.
+ */
 type JsonRead =
   | { readonly kind: 'parsed'; readonly value: unknown }
-  | { readonly kind: 'malformed' }
+  | { readonly kind: 'refused'; readonly refusal: StrictJsonRefusal }
   | { readonly kind: 'absent' };
 
 /** A JSON object, as opposed to an array, a null, or a bare scalar wearing the same file name. */
@@ -214,11 +222,18 @@ export async function verifyEvidence(
   }
 
   /**
-   * Parse one JSON sidecar, once.
+   * Admit one JSON sidecar, once.
    *
-   * Every reader of a sidecar goes through here and reuses the parsed value, so a document cannot
-   * be parsed safely in one place and unsafely in another, and a malformed file produces a result
+   * Every reader of a sidecar goes through here and reuses the admitted value, so a document cannot
+   * be admitted strictly in one place and loosely in another, and a refused file produces a result
    * rather than an exception out of the middle of verification.
+   *
+   * The admission rules are the ones canonicalization requires. These documents are about to be
+   * canonicalized and compared against digests inside a signed record, so bytes that are not valid
+   * UTF-8 are refused rather than repaired, and an object with two members of the same name is
+   * refused rather than resolved: JSON.parse would keep the last occurrence, another parser could
+   * keep the first, and the signed digest would then cover whichever document the reader's parser
+   * happened to build. That is a PEAC binding-safety rule, not an x402 conformance rule.
    */
   const parsedJson = new Map<EvidenceArtifact, JsonRead>();
   const readJsonArtifact = (artifact: EvidenceArtifact): JsonRead => {
@@ -228,21 +243,36 @@ export async function verifyEvidence(
     let read: JsonRead;
     if (bytes === undefined) read = { kind: 'absent' };
     else {
-      try {
-        read = { kind: 'parsed', value: JSON.parse(new TextDecoder().decode(bytes)) };
-      } catch {
-        read = { kind: 'malformed' };
-      }
+      const admitted = parseStrictJson(bytes);
+      read =
+        admitted.status === 'parsed'
+          ? { kind: 'parsed', value: admitted.value }
+          : { kind: 'refused', refusal: admitted.refusal };
     }
     parsedJson.set(artifact, read);
     return read;
   };
 
+  /** Why a sidecar was not admitted, in the report's voice rather than the scanner's. */
+  const refusedDetail = (artifact: EvidenceArtifact, refusal: StrictJsonRefusal): string =>
+    `${artifact} was refused before canonicalization (${refusal})`;
+
   const recordBytes = present.get('record.jws');
   if (recordBytes === undefined) {
     return { ok: false, checks: [fail('record present', 'record.jws is missing')], warnings };
   }
-  const jws = new TextDecoder().decode(recordBytes).trim();
+  // Decoded fatally, like every other document here. A record is base64url text, so bytes that are
+  // not valid UTF-8 are not a record; replacing what is malformed would hand the verification
+  // primitive a string nobody signed.
+  const recordText = decodeStrictUtf8(recordBytes);
+  if (recordText === undefined) {
+    return {
+      ok: false,
+      checks: [fail('record signature and schema', 'the record bytes are not valid UTF-8')],
+      warnings,
+    };
+  }
+  const jws = recordText.trim();
 
   // The record is attacker-controlled bytes like everything else here, so a refusal from the
   // verification primitive is a result and a throw from it is still a verification failure.
@@ -344,7 +374,16 @@ export async function verifyEvidence(
     }
     const parsed = readJsonArtifact(artifact);
     if (parsed.kind !== 'parsed') {
-      checks.push(fail(name, `${artifact} is not readable as JSON`));
+      // Reported without canonicalizing anything: a document that was refused never reaches the
+      // digest computation below, so no digest is recomputed over a document nobody can pin down.
+      checks.push(
+        fail(
+          name,
+          parsed.kind === 'refused'
+            ? refusedDetail(artifact, parsed.refusal)
+            : `${artifact} is missing`,
+        ),
+      );
       return;
     }
     const recomputed = coerceDigest(await computeJsonDocumentDigestJcs(parsed.value as JsonValue));
@@ -415,8 +454,9 @@ export async function verifyEvidence(
   const resultBinding = readJsonArtifact('origin-result-binding.json');
   const bodyBytes = present.get('origin-result-body.bin');
   if (resultBinding.kind !== 'absent') {
-    if (resultBinding.kind === 'malformed') {
-      checks.push(fail('origin result body', 'the result binding is not readable as JSON'));
+    if (resultBinding.kind === 'refused') {
+      const detail = refusedDetail('origin-result-binding.json', resultBinding.refusal);
+      checks.push(fail('origin result body', detail));
     } else if (!isJsonObject(resultBinding.value)) {
       checks.push(fail('origin result body', 'the result binding is not a JSON object'));
     } else if (bodyBytes === undefined) {
@@ -457,8 +497,10 @@ export async function verifyEvidence(
   // A refused or unreached settlement must carry no transaction facts, because a transaction
   // reference beside a failure reads as a payment that happened.
   const observationRead = readJsonArtifact('chain-observation.json');
-  if (observationRead.kind === 'malformed') {
-    checks.push(fail('chain observation', 'chain-observation.json is not readable as JSON'));
+  if (observationRead.kind === 'refused') {
+    checks.push(
+      fail('chain observation', refusedDetail('chain-observation.json', observationRead.refusal)),
+    );
   } else if (observationRead.kind === 'parsed' && !isJsonObject(observationRead.value)) {
     checks.push(fail('chain observation', 'chain-observation.json is not a JSON object'));
   } else if (observationRead.kind === 'parsed') {

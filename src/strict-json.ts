@@ -15,6 +15,11 @@
  * The scanner tokenizes only. It decodes string escapes per RFC 8259 so that "a" and "a"
  * are recognised as the same member name, and it never parses values into JavaScript data;
  * JSON.parse remains the object producer.
+ *
+ * `parseStrictJson` at the end of this file is the whole admission rule applied in order: fatal
+ * UTF-8 decoding, then the scan, then the parse. It exists so that every place accepting a JSON
+ * document from outside applies the same three steps in the same order, rather than each caller
+ * assembling its own approximation of them.
  */
 
 export const DUPLICATE_SCAN_LIMITS = {
@@ -239,5 +244,59 @@ export function scanForDuplicateMembers(text: string): DuplicateScanResult {
   } catch (e) {
     if (e instanceof ScanFailure) return { status: 'rejected', code: e.code, path: e.path };
     return { status: 'rejected', code: 'scan_incomplete', path: [] };
+  }
+}
+
+/**
+ * Decode bytes as UTF-8, or refuse them.
+ *
+ * The default `TextDecoder` replaces malformed sequences with U+FFFD, which turns bytes that are
+ * not text into text that nobody wrote. For a document whose canonical bytes are about to be
+ * digested and compared against a signed claim, that substitution is a silent rewrite: the digest
+ * would cover a document the file does not contain. So decoding is fatal, and a refusal is a result
+ * the caller reports rather than an exception out of the middle of verification.
+ *
+ * @returns The decoded text, or `undefined` if the bytes are not valid UTF-8.
+ */
+export function decodeStrictUtf8(bytes: Uint8Array): string | undefined {
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    return undefined;
+  }
+}
+
+/** Why bytes were not admitted as a JSON document. */
+export type StrictJsonRefusal =
+  /** The bytes are not valid UTF-8, and replacing what is malformed would rewrite the document. */
+  | 'invalid_utf8'
+  /** Well-formed enough for the scanner, but not parseable JSON. */
+  | 'not_json'
+  | DuplicateScanCode;
+
+export type StrictJsonRead =
+  | { readonly status: 'parsed'; readonly value: unknown }
+  | { readonly status: 'refused'; readonly refusal: StrictJsonRefusal };
+
+/**
+ * Admit bytes as a JSON document, in the order the admission rules require.
+ *
+ * Decode fatally, scan for ambiguous member names, and only then parse. The order is the point: by
+ * the time a value exists, it cannot be a value two parsers would disagree about, and it cannot
+ * have come from bytes that were repaired on the way in. Anything a caller then canonicalizes and
+ * digests is therefore a document the file actually contains, exactly once.
+ *
+ * Every refusal is named. A caller reports which rule refused the document rather than collapsing
+ * five distinct conditions into "not valid JSON".
+ */
+export function parseStrictJson(bytes: Uint8Array): StrictJsonRead {
+  const text = decodeStrictUtf8(bytes);
+  if (text === undefined) return { status: 'refused', refusal: 'invalid_utf8' };
+  const scan = scanForDuplicateMembers(text);
+  if (scan.status !== 'accepted') return { status: 'refused', refusal: scan.code };
+  try {
+    return { status: 'parsed', value: JSON.parse(text) };
+  } catch {
+    return { status: 'refused', refusal: 'not_json' };
   }
 }

@@ -166,6 +166,24 @@ export const ACCEPTANCE_CASES = {
   'FS-BOUND-007': { description: 'a path that is not a regular file is refused without being opened or waited on', scope: 'local' },
 
   /**
+   * What may be admitted as a document at all, before anything is canonicalized.
+   *
+   * These documents are canonicalized and compared against digests inside a signed record, so a
+   * document two parsers would read differently must never reach canonicalization: the digest would
+   * then cover whichever reading the reader's parser happened to build. Each case is a document
+   * that parses into exactly the expected value and is refused anyway, because what is wrong with
+   * it is that it is ambiguous rather than that it is invalid.
+   *
+   * This is a PEAC binding-safety rule and not an x402 conformance rule.
+   */
+  'STRICT-EV-001': { description: 'a sidecar with a repeated member is refused before canonicalization', scope: 'local' },
+  'STRICT-EV-002': { description: 'a sidecar whose repeated member name is escaped is refused before canonicalization', scope: 'local' },
+  'STRICT-EV-003': { description: 'a sidecar carrying invalid UTF-8 is refused rather than decoded with replacements', scope: 'local' },
+  'STRICT-EV-004': { description: 'a repeated member inside a nested object is refused before canonicalization', scope: 'local' },
+  'STRICT-EV-005': { description: 'a sidecar nested past the scanner bound is refused rather than scanned partially', scope: 'local' },
+  'STRICT-EV-006': { description: 'a supplied public key file with a repeated member is refused before it is used', scope: 'local' },
+
+  /**
    * The material a reviewer needs, produced before anything is spent.
    *
    * A live run that settles a payment and then cannot write the public half of its signing key has
