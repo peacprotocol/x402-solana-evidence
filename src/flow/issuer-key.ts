@@ -10,6 +10,19 @@
  * keeps it across runs, so the same issuer can be recognised between runs. It is a demonstration
  * key on a test network, not an organizational identity.
  *
+ * WHAT THE KEY FILE BINDS. The issuer a record claims is not a free-standing configuration value:
+ * it is the identity a key has been signing under. A key file that stored only the key would let
+ * one key and one key identifier claim `https://a.example` on Monday and `https://b.example` on
+ * Tuesday, purely because an environment variable changed, and both records would verify under the
+ * same public key. A reader holding the two would have no way to tell which claim the key holder
+ * meant, and this example would have demonstrated exactly the ambiguity it exists to avoid.
+ *
+ * So the issuer is written into the key file when the key is created, and every later run must be
+ * configured for that same issuer. A disagreement stops the run and changes nothing on disk: the
+ * two ways out are to configure the issuer the key already claims, or to set the key aside so a new
+ * one is created for the new issuer. Neither is guessed at here, because both are decisions about
+ * what an identity means, and only the person running it can make them.
+ *
  * WHAT VERIFICATION MEANS HERE. A record that verifies against one of these keys shows that its
  * contents are intact relative to the key material supplied to the verifier. It does not show that
  * the key belongs to any particular organization, and nothing in this example establishes that.
@@ -24,7 +37,7 @@ import { chmodSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { derivePublicKey, generateKeypair } from '@peac/crypto';
-import { parseKeyFileJson, readKeyFile, refuseKeyFile, writeNewKeyFile } from './key-file.ts';
+import { displayKeyPath, readAdmittedKeyFile, refuseKeyFile, writeNewKeyFile } from './key-file.ts';
 
 const APP_ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const KEY_DIR = join(APP_ROOT, '.local', 'keys');
@@ -61,11 +74,86 @@ const DEFAULT_DEVNET_ISSUER = 'https://origin.example.test';
 interface StoredIssuerKey {
   readonly note: string;
   readonly kid: string;
+  /** The issuer this key has been claiming. Written when the key is created, never rewritten. */
+  readonly issuer: string;
   readonly privateKeyHex: string;
 }
 
 /** Exactly the 32 bytes of an Ed25519 private key, written as lower or upper case hex. */
 const PRIVATE_KEY_HEX = /^[0-9a-fA-F]{64}$/;
+
+/** A configured issuer this example will not sign under. Never raised about a key file. */
+export class IssuerConfigurationError extends Error {
+  constructor(reason: string) {
+    super(
+      `The configured issuer cannot be used: ${reason}\n` +
+        `  Set ${DEVNET_ISSUER_ENV} to an absolute http or https URL naming the party that issues ` +
+        'these records, or leave it unset to use the default.',
+    );
+    this.name = 'IssuerConfigurationError';
+  }
+}
+
+/** An existing key already claims a different issuer. Nothing is written and nothing is guessed. */
+export class IssuerBindingError extends Error {
+  readonly path: string;
+  readonly storedIssuer: string;
+  readonly configuredIssuer: string;
+  constructor(path: string, storedIssuer: string, configuredIssuer: string) {
+    super(
+      `The issuer key at ${displayKeyPath(path)} records a different issuer. It was not modified, ` +
+        'and nothing was signed.\n' +
+        `  the key file records : ${storedIssuer}\n` +
+        `  this run is configured for: ${configuredIssuer}\n` +
+        '  One key claiming two issuers would produce records that verify under the same public\n' +
+        '  key while naming different parties. Either configure the issuer this key already\n' +
+        '  claims, or move the key file aside so a new key is created for the new issuer.',
+    );
+    this.name = 'IssuerBindingError';
+    this.path = path;
+    this.storedIssuer = storedIssuer;
+    this.configuredIssuer = configuredIssuer;
+  }
+}
+
+/**
+ * Check that a value can be used as the issuer a record claims.
+ *
+ * An issuer identifies a party, so it has to be something a reader could resolve: an absolute http
+ * or https URL. Credentials and fragments are refused rather than stripped, because this value is
+ * signed into a document meant to be handed to someone else, and quietly publishing a trimmed
+ * version of what was configured is worse than refusing it.
+ *
+ * The value is returned exactly as supplied. Nothing is normalized: a trailing slash added here
+ * would mean the record claims an issuer nobody configured.
+ *
+ * @param value - The configured issuer, exactly as it arrived.
+ * @throws IssuerConfigurationError when it is not usable as an issuer identity.
+ */
+export function assertUsableIssuer(value: string): string {
+  if (value.length === 0) throw new IssuerConfigurationError('it is empty');
+  if (value.length > 256) throw new IssuerConfigurationError('it is longer than 256 characters');
+  if (value.trim() !== value) throw new IssuerConfigurationError('it has leading or trailing whitespace');
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new IssuerConfigurationError('it is not an absolute URL');
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new IssuerConfigurationError('it is not an http or https URL');
+  }
+  if (url.username.length > 0 || url.password.length > 0) {
+    throw new IssuerConfigurationError('it carries credentials, which would be signed into records');
+  }
+  if (url.hash.length > 0) throw new IssuerConfigurationError('it carries a fragment');
+  return value;
+}
+
+/** The issuer a devnet run claims, taken from the environment and checked before it is used. */
+function configuredDevnetIssuer(): string {
+  return assertUsableIssuer(process.env[DEVNET_ISSUER_ENV] ?? DEFAULT_DEVNET_ISSUER);
+}
 
 /**
  * Load the stored issuer key.
@@ -75,10 +163,9 @@ const PRIVATE_KEY_HEX = /^[0-9a-fA-F]{64}$/;
  * @throws InvalidKeyFileError when the file exists and does not hold a usable key.
  */
 function loadStoredKey(path: string): StoredIssuerKey | undefined {
-  const text = readKeyFile(path);
-  if (text === undefined) return undefined;
+  const parsed = readAdmittedKeyFile(path);
+  if (parsed === undefined) return undefined;
 
-  const parsed = parseKeyFileJson(path, text);
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     refuseKeyFile(path, 'it does not hold a key object');
   }
@@ -91,7 +178,26 @@ function loadStoredKey(path: string): StoredIssuerKey | undefined {
   if (typeof stored.privateKeyHex !== 'string' || !PRIVATE_KEY_HEX.test(stored.privateKeyHex)) {
     refuseKeyFile(path, 'its private key is not 32 bytes of hex');
   }
-  return { note: String(stored.note ?? ''), kid: stored.kid, privateKeyHex: stored.privateKeyHex };
+  // A key file written before the issuer was recorded. What issuer it has already claimed is not
+  // knowable from the file, and assuming the currently configured one would be inventing exactly
+  // the fact this binding exists to establish.
+  if (stored.issuer === undefined) {
+    refuseKeyFile(
+      path,
+      'it records no issuer, so the issuer this key has already claimed cannot be established; ' +
+        'move it aside so a new key is created, or add the issuer this key has been using if you ' +
+        'know it',
+    );
+  }
+  if (typeof stored.issuer !== 'string' || stored.issuer.length === 0) {
+    refuseKeyFile(path, 'its issuer is not a non-empty string');
+  }
+  return {
+    note: String(stored.note ?? ''),
+    kid: stored.kid,
+    issuer: stored.issuer,
+    privateKeyHex: stored.privateKeyHex,
+  };
 }
 
 /**
@@ -99,6 +205,9 @@ function loadStoredKey(path: string): StoredIssuerKey | undefined {
  *
  * @param mode - `fixture` returns the fixed test key; `devnet` reuses or creates the local key.
  * @param path - Where the devnet key file lives. Defaults to the gitignored local key.
+ * @throws IssuerConfigurationError when the configured issuer is not usable as an identity.
+ * @throws IssuerBindingError when an existing key records a different issuer. The file is not
+ *   modified, and no key is generated.
  */
 export async function resolveIssuerKey(
   mode: RunMode,
@@ -113,9 +222,12 @@ export async function resolveIssuerKey(
     };
   }
 
-  const iss = process.env[DEVNET_ISSUER_ENV] ?? DEFAULT_DEVNET_ISSUER;
+  // Decided before the key file is opened, so a run configured with an issuer this example will not
+  // sign under stops without having touched stored key material at all.
+  const iss = configuredDevnetIssuer();
   const stored = loadStoredKey(path);
   if (stored !== undefined) {
+    if (stored.issuer !== iss) throw new IssuerBindingError(path, stored.issuer, iss);
     const privateKey = Uint8Array.from(Buffer.from(stored.privateKeyHex, 'hex'));
     try {
       return { privateKey, publicKey: await derivePublicKey(privateKey), kid: stored.kid, iss };
@@ -130,8 +242,11 @@ export async function resolveIssuerKey(
   const payload: StoredIssuerKey = {
     note: 'Demonstration key for a test network. Not an organizational identity.',
     kid,
+    issuer: iss,
     privateKeyHex: Buffer.from(generated.privateKey).toString('hex'),
   };
+  // Written exclusively, so a key file that appeared since the load above is refused rather than
+  // replaced, and the issuer recorded here is the one this key will claim from now on.
   writeNewKeyFile(path, `${JSON.stringify(payload, null, 2)}\n`);
   // Set separately as well, in case the file's mode did not come from the create above.
   chmodSync(path, 0o600);

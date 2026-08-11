@@ -17,8 +17,10 @@
  * a key is never guessed at: verifying under a key nobody can describe would report a result about
  * material the reader did not choose.
  */
-import { readFileSync, writeFileSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import { displayKeyPath } from './key-file.ts';
+import { parseStrictJson, type StrictJsonRefusal } from '../strict-json.ts';
+import { PUBLIC_KEY_FILE_MAX_BYTES, readBoundedFile } from './safe-read.ts';
 
 /** The only algorithm this example issues or verifies under. */
 export const PUBLIC_KEY_ALGORITHM = 'Ed25519';
@@ -97,6 +99,16 @@ export function writeIssuerPublicKeyFile(
   writeFileSync(path, `${JSON.stringify(contents, null, 2)}\n`, { flag: 'wx' });
 }
 
+/** Why a key file was not admitted, said in the words a reader of the message needs. */
+const KEY_FILE_REFUSALS: Readonly<Record<StrictJsonRefusal, string>> = {
+  invalid_utf8: 'it is not valid UTF-8, and repairing the bytes would change what it declares',
+  not_json: 'it is not valid JSON',
+  scan_incomplete: 'it is not valid JSON',
+  duplicate_member:
+    'it declares the same member twice, so which key it names depends on the parser reading it',
+  depth_limit_exceeded: 'it nests deeper than a key file is read',
+};
+
 /**
  * Read a public key file, or refuse it.
  *
@@ -104,26 +116,31 @@ export function writeIssuerPublicKeyFile(
  * @throws InvalidPublicKeyFileError for anything that is not a usable Ed25519 public key.
  */
 export function readIssuerPublicKeyFile(path: string): LoadedIssuerPublicKey {
-  let text: string;
-  try {
-    text = readFileSync(path, 'utf8');
-  } catch (e) {
+  // A key file arrives from wherever the evidence did, so it is read the way the evidence is read:
+  // bounded, regular files only, and every refusal named rather than collapsed into "unreadable".
+  const read = readBoundedFile(path, PUBLIC_KEY_FILE_MAX_BYTES);
+  if (read.kind === 'absent') {
+    throw new InvalidPublicKeyFileError(path, 'there is no file at this path');
+  }
+  if (read.kind === 'refused') {
     const reason =
-      (e as NodeJS.ErrnoException).code === 'ENOENT'
-        ? 'there is no file at this path'
-        : `it could not be read (${(e as Error).message.split('\n')[0]})`;
+      read.refusal === 'symbolic_link'
+        ? 'it is a symbolic link, and this reads regular files only'
+        : read.refusal === 'not_a_regular_file'
+          ? `it is not a regular file (${read.detail})`
+          : read.refusal === 'too_large'
+            ? `it is larger than a key file can be (${read.detail})`
+            : `it could not be read (${read.detail})`;
     throw new InvalidPublicKeyFileError(path, reason);
   }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch (e) {
-    throw new InvalidPublicKeyFileError(
-      path,
-      `it is not valid JSON (${(e as Error).message.split('\n')[0]})`,
-    );
+  // The same admission rules the evidence documents get, for the same reason: this file arrives
+  // from outside, and a key file whose members are ambiguous describes two different keys depending
+  // on which parser reads it.
+  const admitted = parseStrictJson(read.bytes);
+  if (admitted.status === 'refused') {
+    throw new InvalidPublicKeyFileError(path, KEY_FILE_REFUSALS[admitted.refusal]);
   }
+  const parsed: unknown = admitted.value;
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     throw new InvalidPublicKeyFileError(path, 'it does not hold a key object');
   }

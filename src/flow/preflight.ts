@@ -24,10 +24,11 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SOLANA_DEVNET_CAIP2, USDC_DEVNET_ADDRESS, DEVNET_RPC_URL } from '@x402/svm';
-import { isAddress } from '@solana/kit';
+import { isAddress, type createSolanaRpc } from '@solana/kit';
 import type { FacilitatorClient } from '@x402/core/server';
 import type { Network } from '@x402/core/types';
 import { displayKeyPath } from './key-file.ts';
+import { ENDPOINT_UNREACHABLE } from './observe-transaction.ts';
 import { loadPayerSigner, PAYER_KEY_PATH, resolvePayerSigner } from './payer-key.ts';
 
 const APP_ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
@@ -64,6 +65,11 @@ export interface PreflightReport {
 const ok = (name: string, detail: string): PreflightCheck => ({ name, status: 'ok', detail });
 const failed = (name: string, detail: string): PreflightCheck => ({ name, status: 'failed', detail });
 const note = (name: string, detail: string): PreflightCheck => ({ name, status: 'note', detail });
+const notEvaluated = (name: string, detail: string): PreflightCheck => ({
+  name,
+  status: 'not_evaluated',
+  detail,
+});
 
 /** Create or reuse the devnet payer key and report the address a person needs to fund. */
 export async function resolvePayerAddress(): Promise<string> {
@@ -156,13 +162,81 @@ export function checkLocalConfiguration(input: {
   return checks;
 }
 
-/** Balance and network-identity checks. Opens connections; never called by the offline path. */
-export async function checkChainState(payerAddress: string, rpcUrl: string): Promise<PreflightCheck[]> {
+/**
+ * How long any single request to the configured endpoint may take before it is treated as no
+ * answer.
+ *
+ * An endpoint that never responds is not the same failure as one that refuses a connection: the
+ * second returns an error and the first returns nothing at all, so a preparation command without a
+ * deadline can sit there indefinitely with no output and no way to tell it apart from slow work.
+ * The bound turns that into an ordinary failed check.
+ */
+export const PREFLIGHT_RPC_TIMEOUT_MS = 12_000;
+
+/**
+ * The endpoint calls this preflight makes, and nothing else.
+ *
+ * Narrowed from the full client so a test can supply an endpoint that behaves however the case
+ * needs, including one that never answers, without a socket and without reconstructing a client.
+ */
+export type ChainStateRpc = Pick<
+  ReturnType<typeof createSolanaRpc>,
+  'getGenesisHash' | 'getBalance' | 'getTokenAccountsByOwner'
+>;
+
+export interface ChainStateOptions {
+  /** Per-request deadline. Defaults to `PREFLIGHT_RPC_TIMEOUT_MS`. */
+  readonly timeoutMs?: number;
+  /** The endpoint to ask. Defaults to a client for `rpcUrl`. Supplied by tests. */
+  readonly rpc?: ChainStateRpc;
+}
+
+/**
+ * Balance and network-identity checks. Opens connections; never called by the offline path.
+ *
+ * Every request carries a deadline, and a request that does not answer within it becomes a named
+ * failed check rather than a wait with no end. The reason recorded is fixed text: an endpoint's own
+ * message is written to a terminal and pasted into run notes, and it can say anything at all.
+ *
+ * A genesis call that does not answer stops the sequence, because the two calls after it are to the
+ * same endpoint and would spend the same deadline again to learn the same thing. They are reported
+ * as not evaluated, which is what they are.
+ */
+export async function checkChainState(
+  payerAddress: string,
+  rpcUrl: string,
+  options: ChainStateOptions = {},
+): Promise<PreflightCheck[]> {
   const { createSolanaRpc, address } = await import('@solana/kit');
-  const rpc = createSolanaRpc(rpcUrl);
+  const rpc = options.rpc ?? createSolanaRpc(rpcUrl);
+  const timeoutMs = options.timeoutMs ?? PREFLIGHT_RPC_TIMEOUT_MS;
   const checks: PreflightCheck[] = [];
 
-  const genesisHash = await rpc.getGenesisHash().send();
+  /**
+   * Send one request under the deadline.
+   *
+   * Whatever came back from a failure is deliberately dropped rather than reported: a timeout, a
+   * refused connection and an error the endpoint composed itself are all "no usable answer" here,
+   * and only the last one carries remote text.
+   */
+  const attempt = async <T>(
+    request: () => { send(config?: { abortSignal?: AbortSignal }): Promise<T> },
+  ): Promise<T | undefined> => {
+    try {
+      return await request().send({ abortSignal: AbortSignal.timeout(timeoutMs) });
+    } catch {
+      return undefined;
+    }
+  };
+
+  const genesisHash = await attempt(() => rpc.getGenesisHash());
+  if (genesisHash === undefined) {
+    return [
+      failed('endpoint genesis matches devnet', ENDPOINT_UNREACHABLE),
+      notEvaluated('payer SOL balance', 'the endpoint did not answer'),
+      notEvaluated('payer holds devnet USDC', 'the endpoint did not answer'),
+    ];
+  }
   const derivedCaip2 = `solana:${String(genesisHash).slice(0, 32)}`;
   checks.push(
     derivedCaip2 === SOLANA_DEVNET_CAIP2
@@ -175,24 +249,37 @@ export async function checkChainState(payerAddress: string, rpcUrl: string): Pro
 
   // Reported, not required: the facilitator pays the transaction fee, so a payer with no SOL can
   // still complete this flow. See the note at the top of this file for where that is decided.
-  const lamports = (await rpc.getBalance(address(payerAddress)).send()).value;
+  const balance = await attempt(() => rpc.getBalance(address(payerAddress)));
   checks.push(
-    note('payer SOL balance', `${lamports} lamports, not required for this flow`),
+    balance === undefined
+      ? note('payer SOL balance', `not read: ${ENDPOINT_UNREACHABLE}`)
+      : note('payer SOL balance', `${balance.value} lamports, not required for this flow`),
   );
 
-  const tokenAccounts = await rpc
-    .getTokenAccountsByOwner(
+  const tokenAccounts = await attempt(() =>
+    rpc.getTokenAccountsByOwner(
       address(payerAddress),
       { mint: address(USDC_DEVNET_ADDRESS) },
       { encoding: 'jsonParsed' },
-    )
-    .send();
+    ),
+  );
+  if (tokenAccounts === undefined) {
+    checks.push(failed('payer holds devnet USDC', ENDPOINT_UNREACHABLE));
+    return checks;
+  }
   let usdc = 0n;
-  for (const account of tokenAccounts.value) {
-    const parsed = account.account.data.parsed as {
-      info?: { tokenAmount?: { amount?: string } };
-    };
-    usdc += BigInt(parsed.info?.tokenAmount?.amount ?? '0');
+  try {
+    for (const account of tokenAccounts.value) {
+      const parsed = account.account.data.parsed as {
+        info?: { tokenAmount?: { amount?: string } };
+      };
+      usdc += BigInt(parsed.info?.tokenAmount?.amount ?? '0');
+    }
+  } catch {
+    // An amount that is not an integer is something only the endpoint can produce, so it is
+    // reported as a balance this run could not read rather than raised as a fault of this process.
+    checks.push(failed('payer holds devnet USDC', 'the endpoint reported a balance this run could not read'));
+    return checks;
   }
   checks.push(
     usdc >= MIN_USDC_BASE_UNITS
@@ -206,7 +293,14 @@ export async function checkChainState(payerAddress: string, rpcUrl: string): Pro
   return checks;
 }
 
-/** Asks the configured facilitator what it supports, through the upstream client. */
+/**
+ * Asks the configured facilitator what it supports, through the upstream client.
+ *
+ * The wait is bounded by that client rather than here: its configuration applies a per-request
+ * deadline to every `getSupported` attempt, defaulting to thirty seconds. So this call cannot hang,
+ * and adding a second deadline around it would mean two different components deciding when the same
+ * request has failed.
+ */
 export async function checkFacilitatorSupport(
   facilitatorClient: FacilitatorClient,
   network: Network,

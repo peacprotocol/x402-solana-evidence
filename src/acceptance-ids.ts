@@ -149,6 +149,65 @@ export const ACCEPTANCE_CASES = {
   'HOSTILE-EV-005': { description: 'an artifact that exists but cannot be read fails, and is never read as absent', scope: 'local' },
 
   /**
+   * The filesystem itself as a hostile input.
+   *
+   * A directory handed over by another party decides how large its files are and what its names
+   * point at. Reading it without bounds trusts both. Each case here is a directory a verifier could
+   * be handed, and the property is the same in all of them: a bounded, named failure, promptly,
+   * rather than a crash, an exhausted process, or a read of something the directory does not
+   * contain.
+   */
+  'FS-BOUND-001': { description: 'a request binding past its size bound is refused before it is read into memory', scope: 'local' },
+  'FS-BOUND-002': { description: 'a chain observation past its size bound is refused before it is read into memory', scope: 'local' },
+  'FS-BOUND-003': { description: 'an origin result body past its size bound is refused before it is read into memory', scope: 'local' },
+  'FS-BOUND-004': { description: 'a symbolic link standing in for a sidecar is refused rather than followed', scope: 'local' },
+  'FS-BOUND-005': { description: 'a symbolic link standing in for a captured field value is refused rather than followed', scope: 'local' },
+  'FS-BOUND-006': { description: 'a symbolic link standing in for the nested artifact directory is refused rather than followed', scope: 'local' },
+  'FS-BOUND-007': { description: 'a path that is not a regular file is refused without being opened or waited on', scope: 'local' },
+
+  /**
+   * What may be admitted as a document at all, before anything is canonicalized.
+   *
+   * These documents are canonicalized and compared against digests inside a signed record, so a
+   * document two parsers would read differently must never reach canonicalization: the digest would
+   * then cover whichever reading the reader's parser happened to build. Each case is a document
+   * that parses into exactly the expected value and is refused anyway, because what is wrong with
+   * it is that it is ambiguous rather than that it is invalid.
+   *
+   * This is a PEAC binding-safety rule and not an x402 conformance rule.
+   */
+  'STRICT-EV-001': { description: 'a sidecar with a repeated member is refused before canonicalization', scope: 'local' },
+  'STRICT-EV-002': { description: 'a sidecar whose repeated member name is escaped is refused before canonicalization', scope: 'local' },
+  'STRICT-EV-003': { description: 'a sidecar carrying invalid UTF-8 is refused rather than decoded with replacements', scope: 'local' },
+  'STRICT-EV-004': { description: 'a repeated member inside a nested object is refused before canonicalization', scope: 'local' },
+  'STRICT-EV-005': { description: 'a sidecar nested past the scanner bound is refused rather than scanned partially', scope: 'local' },
+  'STRICT-EV-006': { description: 'a supplied public key file with a repeated member is refused before it is used', scope: 'local' },
+
+  /**
+   * Evidence that is intact and still describes two different things.
+   *
+   * Signature, digests and presence answer whether a directory was altered after it was produced.
+   * They cannot answer whether the producer was coherent: a record and an observation that disagree
+   * about the network, the amount or the result were signed and bound together, and nothing about
+   * them is damaged. Each case here builds exactly that directory, with a valid signature and every
+   * digest recomputing, and asserts the named check that catches the disagreement.
+   *
+   * These are INTERNAL CONSISTENCY cases. They compare the evidence against itself and assert
+   * nothing about a chain, a transaction, finality or an issuer's identity.
+   */
+  'COHERE-001': { description: 'a record and an observation naming different networks is reported as inconsistent', scope: 'local' },
+  'COHERE-002': { description: 'a record and an observation naming different terminal states is reported as inconsistent', scope: 'local' },
+  'COHERE-003': { description: 'a record and an observation naming different assets is reported as inconsistent', scope: 'local' },
+  'COHERE-004': { description: 'a record and an observation naming different amounts is reported as inconsistent', scope: 'local' },
+  'COHERE-005': { description: 'a settlement response digest recorded differently in the two documents is reported as inconsistent', scope: 'local' },
+  'COHERE-006': { description: 'a result binding and an observation naming different origin result digests is reported as inconsistent', scope: 'local' },
+  'COHERE-007': { description: 'a chain observation naming another local profile is refused', scope: 'local' },
+  'COHERE-008': { description: 'a chain observation naming another payment scheme is refused', scope: 'local' },
+  'COHERE-009': { description: 'a request binding that violates its example-local schema fails its own named check', scope: 'local' },
+  'COHERE-010': { description: 'an origin result binding that violates its example-local schema fails its own named check', scope: 'local' },
+  'COHERE-011': { description: 'the committed evidence satisfies every profile and agreement check', scope: 'local' },
+
+  /**
    * The material a reviewer needs, produced before anything is spent.
    *
    * A live run that settles a payment and then cannot write the public half of its signing key has
@@ -183,6 +242,23 @@ export const ACCEPTANCE_CASES = {
   'KEY-FC-004': { description: 'an issuer key file with an unusable private key is refused and left unchanged', scope: 'local' },
 
   /**
+   * The issuer a stored key claims.
+   *
+   * A key file that stores only a key lets one key and one key identifier claim a different issuer
+   * on every run, purely because an environment variable changed, and every one of those records
+   * verifies under the same public key. The issuer is therefore written into the key file when the
+   * key is created, and a later run configured for a different one stops without modifying
+   * anything. Nothing is migrated and nothing is guessed: what an identity means is a decision for
+   * the person running it.
+   */
+  'ISS-BIND-001': { description: 'creating a devnet issuer key records the issuer it will claim', scope: 'local' },
+  'ISS-BIND-002': { description: 'reloading under the recorded issuer returns the same key', scope: 'local' },
+  'ISS-BIND-003': { description: 'a run configured for a different issuer is refused', scope: 'local' },
+  'ISS-BIND-004': { description: 'a refused issuer binding leaves the key file byte-identical', scope: 'local' },
+  'ISS-BIND-005': { description: 'a key file recording no issuer is refused with what to do about it', scope: 'local' },
+  'ISS-BIND-006': { description: 'an ambiguous key file, and a configured issuer this example will not sign under, are both refused', scope: 'local' },
+
+  /**
    * Preflight revalidation and recipient validation. Only the pre-network failure paths are
    * exercised here, which is exactly what these cases are about: a live run must stop on local
    * grounds before it reaches for a connection, and that is decidable offline. The passing live
@@ -195,6 +271,16 @@ export const ACCEPTANCE_CASES = {
   'PRE-ADDR-002': { description: 'a recipient that is not valid base58 is rejected', scope: 'local' },
   'PRE-ADDR-003': { description: 'a recipient of the wrong length is rejected', scope: 'local' },
   'PRE-ADDR-004': { description: 'a recipient carrying whitespace is rejected rather than trimmed', scope: 'local' },
+
+  /**
+   * An endpoint that answers nothing.
+   *
+   * The failure without an error: the request is accepted and nothing comes back. Exercised against
+   * an injected endpoint that never settles, so the case needs no socket and no remote host, and
+   * the property is that a bounded named failure arrives rather than a command that never returns.
+   */
+  'PRE-TIME-001': { description: 'an endpoint that never answers becomes a bounded named preflight failure', scope: 'local' },
+  'PRE-TIME-002': { description: 'checks that could not run are reported as not evaluated, in this repository\'s own words', scope: 'local' },
 } as const satisfies Record<string, AcceptanceCase>;
 
 export type AcceptanceId = keyof typeof ACCEPTANCE_CASES;

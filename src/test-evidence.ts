@@ -11,6 +11,8 @@
  * Nothing here opens a connection or spawns a process.
  */
 import { generateKeypair } from '@peac/crypto';
+import { computeJsonDocumentDigestJcs, issue } from '@peac/protocol';
+import type { JsonValue } from '@peac/kernel';
 import {
   chmodSync,
   cpSync,
@@ -35,9 +37,11 @@ import {
 import { buildEvidence, FIXTURE_EVIDENCE_OPTIONS, runOnce } from './flow/fixture-e2e.ts';
 import { createPaidResource } from './flow/server.ts';
 import {
+  COMMERCE_GROUP,
   EvidenceCollisionError,
   EXPECTED_EVIDENCE_DIR,
   EXPECTED_EVIDENCE_DISPLAY,
+  PAYMENT_EVIDENCE_GROUP,
   prepareRunOutputs,
   writeEvidence,
   writeEvidenceTransactionally,
@@ -54,6 +58,7 @@ import {
   type TransactionStatusSource,
 } from './flow/observe-transaction.ts';
 import { facilitatorReference } from './flow/devnet-demo.ts';
+import type { EvidenceArtifact } from './flow/presence.ts';
 import {
   InvalidPublicKeyFileError,
   readIssuerPublicKeyFile,
@@ -990,6 +995,315 @@ recordExecution('HOSTILE-EV-005');
     (verdict.report?.checks ?? []).map((c) => c.name).join(', '),
   );
   rmSync(directory, { recursive: true, force: true });
+}
+
+// ---------------------------------------------------------------------------------------------
+// Evidence that is intact, and internally inconsistent.
+// ---------------------------------------------------------------------------------------------
+
+console.log('\nEvidence whose two documents describe different things\n');
+
+/**
+ * A directory a coherent producer could not have written, and a verifier cannot tell from a good
+ * one by checking signatures and digests alone.
+ *
+ * Each requested document is altered and the record is REISSUED with the digest of what was
+ * actually written, using the same key. The result is not tampering: the signature is genuinely
+ * valid, every bound digest genuinely recomputes, and the presence contract genuinely holds. The
+ * only thing wrong with the directory is that its documents disagree, which is what the agreement
+ * checks exist to catch and what nothing else in the verifier can see.
+ *
+ * @param mutations - How to alter each document. An omitted one is written unchanged.
+ * @returns The directory, written and ready to verify.
+ */
+async function incoherentDirectory(mutations: {
+  readonly observation?: (document: Record<string, unknown>) => Record<string, unknown>;
+  readonly requestBinding?: (document: Record<string, unknown>) => Record<string, unknown>;
+  readonly resultBinding?: (document: Record<string, unknown>) => Record<string, unknown>;
+}): Promise<string> {
+  const layout = await buildEvidence(await runOnce());
+  const encode = (value: unknown): Uint8Array =>
+    new TextEncoder().encode(`${JSON.stringify(value, null, 2)}\n`);
+  const decode = (artifact: EvidenceArtifact): Record<string, unknown> =>
+    JSON.parse(new TextDecoder().decode(layout.files.get(artifact))) as Record<string, unknown>;
+
+  const files = new Map(layout.files);
+  const rebound: Record<string, unknown> = {};
+
+  const rewrite = async (
+    artifact: EvidenceArtifact,
+    boundField: string,
+    mutate?: (document: Record<string, unknown>) => Record<string, unknown>,
+  ): Promise<void> => {
+    if (mutate === undefined) return;
+    const altered = mutate(decode(artifact));
+    files.set(artifact, encode(altered));
+    rebound[boundField] = await computeJsonDocumentDigestJcs(altered as JsonValue);
+  };
+
+  await rewrite('chain-observation.json', 'chain_observation_digest', mutations.observation);
+  await rewrite('request-binding.json', 'request_binding_digest', mutations.requestBinding);
+  await rewrite('origin-result-binding.json', 'origin_result_binding_digest', mutations.resultBinding);
+
+  const payload = layout.jws.split('.')[1];
+  if (payload === undefined) throw new Error('the record is not a compact serialization');
+  const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as {
+    iss: string;
+    type: string;
+    jti: string;
+    occurred_at: string;
+    pillars: string[];
+    extensions: Record<string, Record<string, unknown>>;
+  };
+  const issued = await issue({
+    iss: claims.iss,
+    kind: 'evidence',
+    type: claims.type,
+    privateKey: fixtureKey.privateKey,
+    kid: fixtureKey.kid,
+    jti: claims.jti,
+    pillars: claims.pillars as Parameters<typeof issue>[0]['pillars'],
+    occurred_at: claims.occurred_at,
+    extensions: {
+      [COMMERCE_GROUP]: claims.extensions[COMMERCE_GROUP]!,
+      [PAYMENT_EVIDENCE_GROUP]: { ...claims.extensions[PAYMENT_EVIDENCE_GROUP]!, ...rebound },
+    },
+  });
+
+  const directory = mkdtempSync(join(tmpdir(), 'peac-evidence-incoherent-'));
+  writeEvidence(directory, {
+    jws: issued.jws,
+    files: files.set('record.jws', new TextEncoder().encode(`${issued.jws}\n`)),
+  });
+  return directory;
+}
+
+/**
+ * One incoherent-producer case.
+ *
+ * The assertion is exact rather than "something failed". A disagreement about the amount must fail
+ * the amount check and nothing else, because a check that fires on every kind of damage tells a
+ * reader nothing about which claim is no longer supported. The signature and the digests are
+ * asserted to still pass for the same reason: this is not tampering, and reporting it as tampering
+ * would send a reader looking for an attacker who is not there.
+ */
+async function incoherentCase(input: {
+  readonly label: string;
+  readonly mutations: Parameters<typeof incoherentDirectory>[0];
+  readonly expectFailing: string;
+}): Promise<void> {
+  const directory = await incoherentDirectory(input.mutations);
+  try {
+    const report = await verifyEvidence(directory, fixtureKey.publicKey);
+    const failing = failedChecks(report);
+    check(
+      `${input.label}: the record itself is intact, so this is not tampering`,
+      report.checks.some((c) => c.name === 'record signature and schema' && c.ok) &&
+        report.checks.some((c) => c.name === 'chain observation digest' && c.ok),
+      failing.join(', ') || 'nothing failed',
+    );
+    check(
+      `${input.label}: the directory does not verify`,
+      report.ok === false,
+      'it verified',
+    );
+    check(
+      `${input.label}: exactly "${input.expectFailing}" is reported as failing`,
+      failing.length === 1 && failing[0] === input.expectFailing,
+      failing.join(', ') || 'nothing failed',
+    );
+    check(
+      `${input.label}: the failure names both sides without deciding which is right`,
+      /the record carries|one document names|the observation carries|the document names/.test(
+        report.checks.find((c) => c.name === input.expectFailing)?.detail ?? '',
+      ),
+      report.checks.find((c) => c.name === input.expectFailing)?.detail ?? 'no such check',
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+const NETWORK_CHECK = 'record and observation name the same network';
+const TERMINAL_CHECK = 'record and observation name the same terminal state';
+const ASSET_CHECK = 'record and observation name the same asset';
+const AMOUNT_CHECK = 'record and observation name the same amount';
+const SETTLEMENT_DIGEST_CHECK = 'record and observation name the same settlement response digest';
+const RESULT_DIGEST_CHECK = 'result binding and observation name the same origin result digest';
+const OBSERVATION_PROFILE_CHECK = 'chain observation local profile';
+const OBSERVATION_SCHEME_CHECK = 'chain observation scheme';
+const REQUEST_PROFILE_CHECK = 'request binding local profile';
+const RESULT_PROFILE_CHECK = 'origin result binding local profile';
+
+/** A digest of the right shape that no document in this directory produced. */
+const OTHER_DIGEST = `sha256:${'a'.repeat(64)}`;
+
+recordExecution('COHERE-001');
+await incoherentCase({
+  label: 'an observation naming another network',
+  mutations: { observation: (d) => ({ ...d, network: 'solana:4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZ' }) },
+  expectFailing: NETWORK_CHECK,
+});
+
+recordExecution('COHERE-002');
+await incoherentCase({
+  label: 'an observation naming another terminal state',
+  mutations: { observation: (d) => ({ ...d, terminalState: 'settlement_failed' }) },
+  expectFailing: TERMINAL_CHECK,
+});
+
+recordExecution('COHERE-003');
+await incoherentCase({
+  label: 'an observation naming another asset',
+  mutations: { observation: (d) => ({ ...d, asset: 'So11111111111111111111111111111111111111112' }) },
+  expectFailing: ASSET_CHECK,
+});
+
+/**
+ * COHERE-004. The amount, which is the field a reader is most likely to act on.
+ *
+ * The record says one price and the observation says another, and both are signed. Without this
+ * check the directory verifies and a reader has no way to tell which number the payment was for.
+ */
+recordExecution('COHERE-004');
+await incoherentCase({
+  label: 'an observation naming another amount',
+  mutations: { observation: (d) => ({ ...d, amountBaseUnits: '1' }) },
+  expectFailing: AMOUNT_CHECK,
+});
+
+recordExecution('COHERE-005');
+await incoherentCase({
+  label: 'an observation naming another settlement response digest',
+  mutations: { observation: (d) => ({ ...d, settlementResponseDigest: OTHER_DIGEST }) },
+  expectFailing: SETTLEMENT_DIGEST_CHECK,
+});
+
+/**
+ * COHERE-006. The link between the payment and the work, stated twice and not agreeing.
+ *
+ * The result binding names the bytes the origin produced; the observation repeats that digest so
+ * the settlement and the result can be read together. When the two disagree, the evidence describes
+ * a payment for one result and a result binding for another.
+ */
+recordExecution('COHERE-006');
+await incoherentCase({
+  label: 'an observation naming another origin result digest',
+  mutations: { observation: (d) => ({ ...d, serviceResultDigest: OTHER_DIGEST }) },
+  expectFailing: RESULT_DIGEST_CHECK,
+});
+
+recordExecution('COHERE-007');
+await incoherentCase({
+  label: 'an observation naming another local profile',
+  mutations: {
+    observation: (d) => ({ ...d, profile: 'org.example/some-other-observation/1' }),
+  },
+  expectFailing: OBSERVATION_PROFILE_CHECK,
+});
+
+/**
+ * COHERE-008. Another payment scheme.
+ *
+ * This example observes `exact` and nothing else, so an observation naming a different scheme is
+ * refused rather than read as though its fields meant what they mean under `exact`. That is a bound
+ * on what this example claims to have looked at, not a judgement about the other scheme.
+ */
+recordExecution('COHERE-008');
+await incoherentCase({
+  label: 'an observation naming another scheme',
+  mutations: { observation: (d) => ({ ...d, scheme: 'upto' }) },
+  expectFailing: OBSERVATION_SCHEME_CHECK,
+});
+
+/**
+ * COHERE-009 and COHERE-010. Documents that are bound, intact, and not the shape this example
+ * produces.
+ *
+ * The digest recomputes in both cases, so nothing else in the verifier has anything to say about
+ * them. What the schema catches is a producer that emitted a document nobody validated: a member
+ * this example never writes, and a status code outside the range a response can carry. Both are
+ * example-local profile failures and neither is a PEAC or x402 conformance result.
+ */
+recordExecution('COHERE-009');
+{
+  const directory = await incoherentDirectory({
+    requestBinding: (d) => ({ ...d, unexpectedMember: 'not part of this profile' }),
+  });
+  const report = await verifyEvidence(directory, fixtureKey.publicKey);
+  const failing = failedChecks(report);
+  check(
+    'a request binding with an unknown member still matches its bound digest',
+    report.checks.some((c) => c.name === 'request binding digest' && c.ok),
+    failing.join(', ') || 'nothing failed',
+  );
+  check(
+    'and exactly its local profile check reports it',
+    failing.length === 1 && failing[0] === REQUEST_PROFILE_CHECK,
+    failing.join(', ') || 'nothing failed',
+  );
+  check(
+    'naming the member that does not belong',
+    (report.checks.find((c) => c.name === REQUEST_PROFILE_CHECK)?.detail ?? '').includes(
+      'unexpectedMember',
+    ),
+    report.checks.find((c) => c.name === REQUEST_PROFILE_CHECK)?.detail ?? 'no such check',
+  );
+  rmSync(directory, { recursive: true, force: true });
+}
+
+recordExecution('COHERE-010');
+{
+  const directory = await incoherentDirectory({ resultBinding: (d) => ({ ...d, status: 999 }) });
+  const report = await verifyEvidence(directory, fixtureKey.publicKey);
+  const failing = failedChecks(report);
+  check(
+    'an origin result binding with an impossible status still matches its bound digest',
+    report.checks.some((c) => c.name === 'origin result binding digest' && c.ok),
+    failing.join(', ') || 'nothing failed',
+  );
+  check(
+    'and exactly its local profile check reports it',
+    failing.length === 1 && failing[0] === RESULT_PROFILE_CHECK,
+    failing.join(', ') || 'nothing failed',
+  );
+  rmSync(directory, { recursive: true, force: true });
+}
+
+/**
+ * COHERE-011. The committed evidence, against every one of these checks.
+ *
+ * A check that never runs on a good directory is a check nobody has seen pass. This asserts that
+ * each one is present and passing on the evidence this repository ships, so the cases above are
+ * measured against a directory where all of them hold.
+ */
+recordExecution('COHERE-011');
+{
+  const report = await verifyEvidence(EXPECTED_EVIDENCE_DIR, fixtureKey.publicKey);
+  for (const name of [
+    NETWORK_CHECK,
+    TERMINAL_CHECK,
+    ASSET_CHECK,
+    AMOUNT_CHECK,
+    SETTLEMENT_DIGEST_CHECK,
+    RESULT_DIGEST_CHECK,
+    OBSERVATION_PROFILE_CHECK,
+    OBSERVATION_SCHEME_CHECK,
+    REQUEST_PROFILE_CHECK,
+    RESULT_PROFILE_CHECK,
+  ]) {
+    check(
+      `the committed evidence passes "${name}"`,
+      report.checks.some((c) => c.name === name && c.ok),
+      report.checks.find((c) => c.name === name)?.detail ?? 'the check did not run',
+    );
+  }
+  check(
+    'and the report says agreement is a property of the documents, not of a chain',
+    !/\bfinal\b|\bfinality\b|\bproves\b|\bon-chain\b|\bonchain\b/i.test(
+      formatReport(EXPECTED_EVIDENCE_DISPLAY, report),
+    ),
+  );
 }
 
 // ---------------------------------------------------------------------------------------------

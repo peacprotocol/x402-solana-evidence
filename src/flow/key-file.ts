@@ -15,6 +15,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseStrictJson, type StrictJsonRefusal } from '../strict-json.ts';
 
 const APP_ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 
@@ -95,4 +96,44 @@ export function parseKeyFileJson(path: string, text: string): unknown {
   } catch (e) {
     refuseKeyFile(path, `it is not valid JSON (${(e as Error).message.split('\n')[0]})`);
   }
+}
+
+/** Why a key file was not admitted, said in the words a reader of the message needs. */
+const STRICT_REFUSALS: Readonly<Record<StrictJsonRefusal, string>> = {
+  invalid_utf8: 'it is not valid UTF-8, and repairing the bytes would change what it declares',
+  not_json: 'it is not valid JSON',
+  scan_incomplete: 'it is not valid JSON',
+  duplicate_member:
+    'it declares the same member twice, so what it names depends on the parser reading it',
+  depth_limit_exceeded: 'it nests deeper than a key file is read',
+};
+
+/**
+ * Read and admit a key file under the same rules a document from outside gets.
+ *
+ * WHY THE STRICTER PATH. `readKeyFile` decodes as UTF-8 with replacement, so bytes that are not
+ * text arrive as text nobody wrote, and `JSON.parse` keeps the last of two members with the same
+ * name, so a file declaring one twice names different things to different parsers. For a document
+ * that decides which key a run signs with, neither is a difference to resolve quietly: both are
+ * refused, and the file is left exactly as it is.
+ *
+ * These files are written by this process into a private directory rather than handed over by
+ * another party, so what this guards against is damage and ambiguity rather than a hostile
+ * directory. The rule is the same either way: never reinterpret, never replace.
+ *
+ * @param path - The key file to read.
+ * @returns The admitted JSON value, or `undefined` when the file does not exist.
+ * @throws InvalidKeyFileError when the file exists and cannot be admitted.
+ */
+export function readAdmittedKeyFile(path: string): unknown {
+  let bytes: Buffer;
+  try {
+    bytes = readFileSync(path);
+  } catch (e) {
+    if (isFileNotFound(e)) return undefined;
+    refuseKeyFile(path, `it could not be read (${(e as Error).message.split('\n')[0]})`);
+  }
+  const admitted = parseStrictJson(bytes);
+  if (admitted.status === 'refused') refuseKeyFile(path, STRICT_REFUSALS[admitted.refusal]);
+  return admitted.value;
 }

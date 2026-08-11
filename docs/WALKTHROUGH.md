@@ -30,17 +30,18 @@ Nothing here touches a network. The origin listens on the loopback interface, th
 in this process, and the wallet is a stand-in that returns fixed placeholder bytes.
 
 ```bash
-pnpm test:imports     # upstream export paths and exact version pins
-pnpm test:golden      # deterministic validation vectors and staged-validation reporting
-pnpm test:negative    # rejection corpus
-pnpm test:keys        # key creation, persistence and fail-closed loading
-pnpm test:preflight   # preflight revalidation and recipient validation
-pnpm test:flow        # offline end-to-end run and the lifecycle failure branches
-pnpm test:svm         # security, replay, binding and tamper cases
-pnpm test:evidence    # verifying an evidence directory under a supplied public key
-pnpm typecheck        # TypeScript 7, primary
-pnpm typecheck:compat # TypeScript 6, compatibility gate
-pnpm test:acceptance  # every declared acceptance case executed
+pnpm test:imports         # upstream export paths and exact version pins
+pnpm test:golden          # deterministic validation vectors and staged-validation reporting
+pnpm test:negative        # rejection corpus
+pnpm test:keys            # key creation, persistence and fail-closed loading
+pnpm test:preflight       # preflight revalidation and recipient validation
+pnpm test:flow            # offline end-to-end run and the lifecycle failure branches
+pnpm test:svm             # security, replay, binding and tamper cases
+pnpm test:evidence        # verifying an evidence directory under a supplied public key
+pnpm test:verifier-inputs # hostile inputs handed to the verifier: bounds, file types, links
+pnpm typecheck            # TypeScript 7, primary
+pnpm typecheck:compat     # TypeScript 6, compatibility gate
+pnpm test:acceptance      # every declared acceptance case executed
 ```
 
 `pnpm test` runs all of the above in that order, stopping at the first failure, and it is what

@@ -32,7 +32,8 @@ x402 challenge -> SVM exact payment -> origin result -> native settlement artifa
 - x402 v2, scheme `exact`, on SVM, denominated in Solana Devnet USDC.
 - The HTTP operation associated with the payment interaction, as RFC 9421 request components the
   origin observed rather than components rebuilt by re-parsing a URL.
-- The exact bytes the origin produced, covered by digest, so the payment is bound to the work.
+- The exact bytes the origin produced, covered by digest, so the PEAC evidence binds the recorded
+  payment interaction to the work.
 - Native x402 artifacts preserved verbatim and left authoritative for their own claims; this
   example digests and references them rather than reinterpreting them.
 - A PEAC-signed record over those bindings, verifiable from the files and a public key alone: no
@@ -63,11 +64,14 @@ than condemning the directory.
 
 ## How this relates to x402
 
-x402's signed offer and receipt extension provides portable proof-of-interaction and binds native
-payment artifacts to resource and payment context. This reference adds a PEAC-signed binding over
-selected RFC 9421 HTTP request components, the exact origin-produced result bytes by digest, native
-x402 artifact digests, and explicit failure-state and presence semantics that can be verified
-offline.
+x402's signed offer and receipt extension produces signed proof-of-interaction artifacts for the
+offer and for post-payment service context. This reference separately adds a PEAC-signed binding
+over selected RFC 9421 HTTP request components, the exact origin-produced result bytes by digest,
+digests of the native x402 artifacts, and explicit failure-state and presence semantics that can be
+verified offline.
+
+This evidence binding does not change the authorization semantics of the underlying x402 payment
+proof or make that payment authorization request-bound.
 
 The two are complementary, not corrective. This example adds two application-local documents and
 nothing else:
@@ -334,6 +338,7 @@ pnpm test:preflight              # preflight revalidation and recipient validati
 pnpm test:flow                   # offline end-to-end run and the lifecycle failure branches
 pnpm test:svm                    # security, replay, binding and tamper cases
 pnpm test:evidence               # verifying an evidence directory under a supplied public key
+pnpm test:verifier-inputs        # hostile inputs handed to the verifier: bounds, file types, links
 pnpm typecheck                   # TypeScript 7, primary
 pnpm typecheck:compat            # TypeScript 6, compatibility gate
 pnpm test:acceptance             # every declared acceptance case executed
