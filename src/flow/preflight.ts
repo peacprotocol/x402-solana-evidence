@@ -192,6 +192,45 @@ export interface ChainStateOptions {
 }
 
 /**
+ * Send one request under the deadline.
+ *
+ * Whatever came back from a failure is deliberately dropped rather than reported: a timeout, a
+ * refused connection and an error the endpoint composed itself are all "no usable answer" here,
+ * and only the last one carries remote text.
+ */
+async function attempt<T>(
+  request: () => { send(config?: { abortSignal?: AbortSignal }): Promise<T> },
+  timeoutMs: number,
+): Promise<T | undefined> {
+  try {
+    return await request().send({ abortSignal: AbortSignal.timeout(timeoutMs) });
+  } catch {
+    return undefined;
+  }
+}
+
+/** Named once: the genesis result decides whether the later endpoint checks are worth asking. */
+const GENESIS_CHECK = 'endpoint genesis matches devnet';
+
+/** The account lookups behind the recipient readiness check, and nothing else. */
+export type RecipientReadinessRpc = Pick<ReturnType<typeof createSolanaRpc>, 'getAccountInfo'>;
+
+export interface RecipientReadinessOptions {
+  /** Per-request deadline. Defaults to `PREFLIGHT_RPC_TIMEOUT_MS`. */
+  readonly timeoutMs?: number;
+  /** The endpoint to ask. Defaults to a client for `rpcUrl`. Supplied by tests. */
+  readonly rpc?: RecipientReadinessRpc;
+}
+
+export const RECIPIENT_READINESS_CHECK = 'recipient can receive devnet USDC';
+
+/**
+ * One wording for one outcome. An account that was never created and an account that exists
+ * without being initialized are the same fact to a payment: there is nothing there to receive it.
+ */
+const ATA_NOT_INITIALIZED = 'the derived devnet USDC associated token account is not initialized';
+
+/**
  * Balance and network-identity checks. Opens connections; never called by the offline path.
  *
  * Every request carries a deadline, and a request that does not answer within it becomes a named
@@ -212,27 +251,10 @@ export async function checkChainState(
   const timeoutMs = options.timeoutMs ?? PREFLIGHT_RPC_TIMEOUT_MS;
   const checks: PreflightCheck[] = [];
 
-  /**
-   * Send one request under the deadline.
-   *
-   * Whatever came back from a failure is deliberately dropped rather than reported: a timeout, a
-   * refused connection and an error the endpoint composed itself are all "no usable answer" here,
-   * and only the last one carries remote text.
-   */
-  const attempt = async <T>(
-    request: () => { send(config?: { abortSignal?: AbortSignal }): Promise<T> },
-  ): Promise<T | undefined> => {
-    try {
-      return await request().send({ abortSignal: AbortSignal.timeout(timeoutMs) });
-    } catch {
-      return undefined;
-    }
-  };
-
-  const genesisHash = await attempt(() => rpc.getGenesisHash());
+  const genesisHash = await attempt(() => rpc.getGenesisHash(), timeoutMs);
   if (genesisHash === undefined) {
     return [
-      failed('endpoint genesis matches devnet', ENDPOINT_UNREACHABLE),
+      failed(GENESIS_CHECK, ENDPOINT_UNREACHABLE),
       notEvaluated('payer SOL balance', 'the endpoint did not answer'),
       notEvaluated('payer holds devnet USDC', 'the endpoint did not answer'),
     ];
@@ -240,28 +262,27 @@ export async function checkChainState(
   const derivedCaip2 = `solana:${String(genesisHash).slice(0, 32)}`;
   checks.push(
     derivedCaip2 === SOLANA_DEVNET_CAIP2
-      ? ok('endpoint genesis matches devnet', derivedCaip2)
-      : failed(
-          'endpoint genesis matches devnet',
-          `endpoint reports ${derivedCaip2}, expected ${SOLANA_DEVNET_CAIP2}`,
-        ),
+      ? ok(GENESIS_CHECK, derivedCaip2)
+      : failed(GENESIS_CHECK, `endpoint reports ${derivedCaip2}, expected ${SOLANA_DEVNET_CAIP2}`),
   );
 
   // Reported, not required: the facilitator pays the transaction fee, so a payer with no SOL can
   // still complete this flow. See the note at the top of this file for where that is decided.
-  const balance = await attempt(() => rpc.getBalance(address(payerAddress)));
+  const balance = await attempt(() => rpc.getBalance(address(payerAddress)), timeoutMs);
   checks.push(
     balance === undefined
       ? note('payer SOL balance', `not read: ${ENDPOINT_UNREACHABLE}`)
       : note('payer SOL balance', `${balance.value} lamports, not required for this flow`),
   );
 
-  const tokenAccounts = await attempt(() =>
-    rpc.getTokenAccountsByOwner(
-      address(payerAddress),
-      { mint: address(USDC_DEVNET_ADDRESS) },
-      { encoding: 'jsonParsed' },
-    ),
+  const tokenAccounts = await attempt(
+    () =>
+      rpc.getTokenAccountsByOwner(
+        address(payerAddress),
+        { mint: address(USDC_DEVNET_ADDRESS) },
+        { encoding: 'jsonParsed' },
+      ),
+    timeoutMs,
   );
   if (tokenAccounts === undefined) {
     checks.push(failed('payer holds devnet USDC', ENDPOINT_UNREACHABLE));
@@ -291,6 +312,88 @@ export async function checkChainState(
   );
 
   return checks;
+}
+
+/**
+ * Whether the recipient can actually receive the asset, at the account the transfer will name.
+ *
+ * A recipient that is a valid address is not yet a recipient that can be paid. In the exact SVM
+ * scheme the transfer does not move tokens to `payTo` itself: it moves them to the associated
+ * token account derived from `payTo` and the mint, and the payment the client builds contains a
+ * compute-budget instruction, one `TransferChecked` and a memo, and nothing that creates that
+ * account. A recipient configured for the first time therefore passes every other check here and
+ * the transfer still has nowhere to land.
+ *
+ * So the exact destination is derived and looked up, rather than the recipient address being
+ * looked up as if it held tokens. Two properties make the derivation the same one the payment
+ * uses: the mint's owning program is read from the mint account rather than assumed, because a
+ * mint may belong to either token program and the derived address differs between them; and the
+ * account found there is required to be a token account naming this mint and this owner, so an
+ * answer about some other account cannot satisfy the check.
+ *
+ * NOTHING IS CREATED, FUNDED OR SENT. This reports a state and never changes one: whether an
+ * account should exist, and who should pay to create it, is a decision for whoever runs this.
+ *
+ * @param payTo - The configured recipient, already established as an address.
+ * @param rpcUrl - The endpoint to ask.
+ */
+export async function checkRecipientReadiness(
+  payTo: string,
+  rpcUrl: string,
+  options: RecipientReadinessOptions = {},
+): Promise<PreflightCheck> {
+  const name = RECIPIENT_READINESS_CHECK;
+  const { createSolanaRpc, address } = await import('@solana/kit');
+  const { findAssociatedTokenPda } = await import('@solana-program/token');
+  const rpc = options.rpc ?? createSolanaRpc(rpcUrl);
+  const timeoutMs = options.timeoutMs ?? PREFLIGHT_RPC_TIMEOUT_MS;
+
+  const mint = await attempt(
+    () => rpc.getAccountInfo(address(USDC_DEVNET_ADDRESS), { encoding: 'jsonParsed' }),
+    timeoutMs,
+  );
+  if (mint === undefined) return failed(name, ENDPOINT_UNREACHABLE);
+  const tokenProgram = mint.value?.owner;
+  if (tokenProgram === undefined || tokenProgram === null) {
+    return failed(name, 'the devnet USDC mint was not found at the configured endpoint');
+  }
+
+  const [destination] = await findAssociatedTokenPda({
+    mint: address(USDC_DEVNET_ADDRESS),
+    owner: address(payTo),
+    tokenProgram,
+  });
+
+  const account = await attempt(
+    () => rpc.getAccountInfo(destination, { encoding: 'jsonParsed' }),
+    timeoutMs,
+  );
+  if (account === undefined) return failed(name, ENDPOINT_UNREACHABLE);
+  if (account.value === null || account.value === undefined) {
+    return failed(name, ATA_NOT_INITIALIZED);
+  }
+
+  // A response that is not a parsed token account, or is one describing a different mint or a
+  // different owner, is not the account this transfer names, whatever address it arrived under.
+  const parsed = (
+    account.value.data as {
+      readonly parsed?: { readonly type?: string; readonly info?: Record<string, unknown> };
+    }
+  ).parsed;
+  if (
+    account.value.owner !== tokenProgram ||
+    parsed?.type !== 'account' ||
+    parsed.info?.['mint'] !== USDC_DEVNET_ADDRESS ||
+    parsed.info?.['owner'] !== payTo
+  ) {
+    return failed(
+      name,
+      'the account at the derived address is not a devnet USDC account for the configured recipient',
+    );
+  }
+  if (parsed.info['state'] !== 'initialized') return failed(name, ATA_NOT_INITIALIZED);
+
+  return ok(name, 'the derived associated token account is initialized');
 }
 
 /**
@@ -384,7 +487,19 @@ export async function runPreflight(options: PreflightOptions): Promise<Preflight
   checks.push(distinctRolesCheck(options.payTo, payerAddress));
   if (checks.some((c) => c.status === 'failed')) return { ready: false, checks, payerAddress };
 
-  checks.push(...(await checkChainState(payerAddress, options.rpcUrl)));
+  const chainChecks = await checkChainState(payerAddress, options.rpcUrl);
+  checks.push(...chainChecks);
+
+  // Asked of the same endpoint the checks above just used, so an endpoint that did not answer them
+  // is not asked again to learn the same thing. That is a check which did not run, and is reported
+  // as one rather than as a recipient that failed.
+  const genesis = chainChecks.find((c) => c.name === GENESIS_CHECK);
+  checks.push(
+    genesis?.status === 'failed' && genesis.detail === ENDPOINT_UNREACHABLE
+      ? notEvaluated(RECIPIENT_READINESS_CHECK, 'the endpoint did not answer')
+      : await checkRecipientReadiness(options.payTo, options.rpcUrl),
+  );
+
   checks.push(await checkFacilitatorSupport(options.facilitatorClient, options.network));
   return { ready: !checks.some((c) => c.status !== 'ok' && c.status !== 'note'), checks, payerAddress };
 }

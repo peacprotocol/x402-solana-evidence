@@ -46,6 +46,7 @@
     "@peac/kernel": "0.16.4",
     "@peac/protocol": "0.16.4",
     "@peac/schema": "0.16.4",
+    "@solana-program/token": "0.9.0",
     "@solana/kit": "5.5.1",
     "@x402/core": "2.21.0",
     "@x402/express": "2.21.0",
