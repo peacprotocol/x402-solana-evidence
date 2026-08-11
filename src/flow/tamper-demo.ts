@@ -65,8 +65,9 @@ export async function main(): Promise<void> {
     console.log(`  Detected at: ${failed.join(', ')}`);
     console.log(
       '  The signature still verifies: the record was not touched. What failed is the digest the\n' +
-        '  record binds for the edited document, so the failure names the claim that is no longer\n' +
-        '  supported rather than condemning the directory as a whole.\n',
+        '  record binds for the edited document, and the one field the record and the observation\n' +
+        '  both carry, so the failure names the claims that are no longer supported rather than\n' +
+        '  condemning the directory as a whole.\n',
     );
   } finally {
     rmSync(directory, { recursive: true, force: true });

@@ -184,6 +184,30 @@ export const ACCEPTANCE_CASES = {
   'STRICT-EV-006': { description: 'a supplied public key file with a repeated member is refused before it is used', scope: 'local' },
 
   /**
+   * Evidence that is intact and still describes two different things.
+   *
+   * Signature, digests and presence answer whether a directory was altered after it was produced.
+   * They cannot answer whether the producer was coherent: a record and an observation that disagree
+   * about the network, the amount or the result were signed and bound together, and nothing about
+   * them is damaged. Each case here builds exactly that directory, with a valid signature and every
+   * digest recomputing, and asserts the named check that catches the disagreement.
+   *
+   * These are INTERNAL CONSISTENCY cases. They compare the evidence against itself and assert
+   * nothing about a chain, a transaction, finality or an issuer's identity.
+   */
+  'COHERE-001': { description: 'a record and an observation naming different networks is reported as inconsistent', scope: 'local' },
+  'COHERE-002': { description: 'a record and an observation naming different terminal states is reported as inconsistent', scope: 'local' },
+  'COHERE-003': { description: 'a record and an observation naming different assets is reported as inconsistent', scope: 'local' },
+  'COHERE-004': { description: 'a record and an observation naming different amounts is reported as inconsistent', scope: 'local' },
+  'COHERE-005': { description: 'a settlement response digest recorded differently in the two documents is reported as inconsistent', scope: 'local' },
+  'COHERE-006': { description: 'a result binding and an observation naming different origin result digests is reported as inconsistent', scope: 'local' },
+  'COHERE-007': { description: 'a chain observation naming another local profile is refused', scope: 'local' },
+  'COHERE-008': { description: 'a chain observation naming another payment scheme is refused', scope: 'local' },
+  'COHERE-009': { description: 'a request binding that violates its example-local schema fails its own named check', scope: 'local' },
+  'COHERE-010': { description: 'an origin result binding that violates its example-local schema fails its own named check', scope: 'local' },
+  'COHERE-011': { description: 'the committed evidence satisfies every profile and agreement check', scope: 'local' },
+
+  /**
    * The material a reviewer needs, produced before anything is spent.
    *
    * A live run that settles a payment and then cannot write the public half of its signing key has

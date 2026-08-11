@@ -4,13 +4,23 @@ Evidence verification: fixtures/expected-evidence
   ok    record type: org.peacprotocol/payment
   ok    extension groups: org.peacprotocol/commerce, com.example/payment_evidence
   ok    request binding digest: sha256:5513399e48c0f10e0d6e6baa43368c327a5cd669c05692772dc47677a21e835e
+  ok    request binding local profile: matches the example-local schema
   ok    origin result binding digest: sha256:ea22f378381de6decceb275b26126380c04475b92f95d92bca6616a048b6a59c
+  ok    origin result binding local profile: matches the example-local schema
   ok    chain observation digest: sha256:f9e28d7b5ab621fdcbcdaacfab24c9d429ee452645f084d6ee9e05a15cfc3942
   ok    payment-required digest: sha256:2b69591210ffb0b6801e0bcd2746706d2b7b8472cec2dea65bdd1c9c694dce25
   ok    payment-signature digest: sha256:1788164a0796619dd8ae79ebac2bfcf7c74f9f84f9286ccb06cbe7ccd023a31e
   ok    payment-response digest: sha256:df8ca9822e5c33468e28ee6b01da790572c8ed35b7f160c812c812a8115eb72e
   ok    origin result body: sha256:5f564269ae83a2ab0cde2d8de9fed2921ffa95e67aa7fa6035884c93bce3087c
   ok    artifact presence contract: consistent with response_write_attempted
+  ok    chain observation local profile: org.peacprotocol.examples.payment-evidence/solana-chain-observation/1
+  ok    chain observation scheme: exact
   ok    settlement facts match the outcome: settled, transaction recorded
+  ok    record and observation name the same network: solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1
+  ok    record and observation name the same terminal state: response_write_attempted
+  ok    record and observation name the same asset: 4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU
+  ok    record and observation name the same amount: 250000
+  ok    record and observation name the same settlement response digest: sha256:df8ca9822e5c33468e28ee6b01da790572c8ed35b7f160c812c812a8115eb72e
+  ok    result binding and observation name the same origin result digest: sha256:5f564269ae83a2ab0cde2d8de9fed2921ffa95e67aa7fa6035884c93bce3087c
 
-Verified. Contents are intact relative to the supplied key, and every bound digest recomputes.
+Verified. Contents are intact relative to the supplied key, every bound digest recomputes, and the checked cross-document fields are internally consistent.

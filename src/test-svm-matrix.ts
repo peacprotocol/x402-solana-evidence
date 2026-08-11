@@ -729,8 +729,12 @@ recordExecution('SVM-TAMPER-001');
   const tampered = documentBytes({ ...binding, bodyDigest: `sha256:${'0'.repeat(64)}` });
   const report = await verifyWith(new Map([['origin-result-binding.json', tampered]]));
   check(
-    'a tampered result digest fails both the bound document and the body it names',
-    failedExactly(report, ['origin result binding digest', 'origin result body']),
+    'a tampered result digest fails the bound document, the body it names, and the observation that repeats it',
+    failedExactly(report, [
+      'origin result binding digest',
+      'origin result body',
+      'result binding and observation name the same origin result digest',
+    ]),
     failedChecks(report).join(', ') || 'nothing failed',
   );
 }
@@ -817,9 +821,11 @@ recordExecution('SVM-TAMPER-004');
   const tampered = documentBytes({ ...observation, amountBaseUnits: '1' });
   const report = await verifyWith(new Map([['chain-observation.json', tampered]]));
   check(
-    'an altered observation document fails its own digest, not the native artifact',
-    failedExactly(report, ['chain observation digest']) &&
-      passed(report, 'payment-response digest'),
+    'an altered observation document fails its own digest and the amount the record repeats, not the native artifact',
+    failedExactly(report, [
+      'chain observation digest',
+      'record and observation name the same amount',
+    ]) && passed(report, 'payment-response digest'),
     failedChecks(report).join(', ') || 'nothing failed',
   );
 }
