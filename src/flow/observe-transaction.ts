@@ -104,8 +104,13 @@ export function publicEndpointReference(
   return url.origin;
 }
 
-/** Fixed reasons. An endpoint's own message is never retained: it can embed anything. */
-const UNREACHABLE = 'the endpoint could not be reached or did not answer in time';
+/**
+ * Fixed reasons. An endpoint's own message is never retained: it can embed anything.
+ *
+ * The first is exported because the preflight reports the same condition about the same kind of
+ * endpoint, and two wordings for one outcome would read as two different outcomes.
+ */
+export const ENDPOINT_UNREACHABLE = 'the endpoint could not be reached or did not answer in time';
 const UNKNOWN_TRANSACTION = 'the endpoint reported no status for this transaction';
 
 function isoOf(observedAtUnixSeconds: number): string {
@@ -144,7 +149,7 @@ export async function observeTransaction(input: {
   try {
     reported = await source.status(transactionSignature);
   } catch {
-    return unavailable(UNREACHABLE);
+    return unavailable(ENDPOINT_UNREACHABLE);
   }
   if (reported === undefined) return unavailable(UNKNOWN_TRANSACTION);
 

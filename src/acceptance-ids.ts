@@ -271,6 +271,16 @@ export const ACCEPTANCE_CASES = {
   'PRE-ADDR-002': { description: 'a recipient that is not valid base58 is rejected', scope: 'local' },
   'PRE-ADDR-003': { description: 'a recipient of the wrong length is rejected', scope: 'local' },
   'PRE-ADDR-004': { description: 'a recipient carrying whitespace is rejected rather than trimmed', scope: 'local' },
+
+  /**
+   * An endpoint that answers nothing.
+   *
+   * The failure without an error: the request is accepted and nothing comes back. Exercised against
+   * an injected endpoint that never settles, so the case needs no socket and no remote host, and
+   * the property is that a bounded named failure arrives rather than a command that never returns.
+   */
+  'PRE-TIME-001': { description: 'an endpoint that never answers becomes a bounded named preflight failure', scope: 'local' },
+  'PRE-TIME-002': { description: 'checks that could not run are reported as not evaluated, in this repository\'s own words', scope: 'local' },
 } as const satisfies Record<string, AcceptanceCase>;
 
 export type AcceptanceId = keyof typeof ACCEPTANCE_CASES;

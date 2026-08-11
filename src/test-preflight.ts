@@ -21,11 +21,14 @@ import { SOLANA_DEVNET_CAIP2, USDC_DEVNET_ADDRESS } from '@x402/svm';
 import type { FacilitatorClient } from '@x402/core/server';
 import { beginAcceptanceSuite, recordExecution } from './acceptance-ids.ts';
 import {
+  checkChainState,
   checkLocalConfiguration,
   distinctRolesCheck,
   runPreflight,
+  type ChainStateRpc,
   type PreflightCheck,
 } from './flow/preflight.ts';
+import { ENDPOINT_UNREACHABLE } from './flow/observe-transaction.ts';
 import { createPayerKeyFile } from './flow/payer-key.ts';
 
 beginAcceptanceSuite('preflight');
@@ -171,6 +174,121 @@ recordExecution('PRE-ROLE-001');
     'a recipient that is not the payer passes the same check',
     distinctRolesCheck(VALID_RECIPIENT, payer.address).status === 'ok',
     distinctRolesCheck(VALID_RECIPIENT, payer.address).detail,
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
+// An endpoint that never answers.
+// ---------------------------------------------------------------------------------------------
+
+console.log('\nPreflight: an endpoint that does not answer\n');
+
+/**
+ * An endpoint that accepts every request and never answers any of them.
+ *
+ * The failure this stands for is the one without an error: a connection that is open, a request
+ * that was accepted, and nothing coming back. Nothing here opens a socket; the promise simply never
+ * settles unless the caller's own deadline rejects it, which is precisely the behaviour under test.
+ */
+function silentEndpoint(): ChainStateRpc & { readonly asked: () => number } {
+  let asked = 0;
+  const pending = () => ({
+    send: (config?: { abortSignal?: AbortSignal }) => {
+      asked += 1;
+      return new Promise<never>((_resolve, reject) => {
+        // A real request in flight holds a socket, which keeps this process alive while it waits.
+        // `AbortSignal.timeout` deliberately does not, so without something standing in for that
+        // socket the run would end for want of work rather than on the deadline, and the case
+        // would prove nothing. It is cleared the moment the deadline fires.
+        const holdingOpen = setInterval(() => {}, 50);
+        const settle = (): void => {
+          clearInterval(holdingOpen);
+          reject(new Error('the request was aborted'));
+        };
+        const signal = config?.abortSignal;
+        if (signal === undefined) return;
+        if (signal.aborted) {
+          settle();
+          return;
+        }
+        signal.addEventListener('abort', settle, { once: true });
+      });
+    },
+  });
+  return {
+    asked: () => asked,
+    getGenesisHash: pending,
+    getBalance: pending,
+    getTokenAccountsByOwner: pending,
+  } as unknown as ChainStateRpc & { readonly asked: () => number };
+}
+
+/**
+ * PRE-TIME-001. A request that is never answered becomes a named failure.
+ *
+ * Without a deadline this call does not fail: it does not return either, and a preparation command
+ * that prints nothing and never exits gives a person no way to tell it apart from slow work. The
+ * timeout used here is a short one supplied by the case, so the suite proves the mechanism without
+ * waiting the real bound.
+ */
+recordExecution('PRE-TIME-001');
+{
+  const endpoint = silentEndpoint();
+  const started = Date.now();
+  const checks = await checkChainState(VALID_RECIPIENT, UNREACHABLE_RPC_URL, {
+    rpc: endpoint,
+    timeoutMs: 250,
+  });
+  const elapsed = Date.now() - started;
+
+  check('the call returns rather than waiting for an answer that never comes', elapsed < 10_000, `${elapsed}ms`);
+  check(
+    'the genesis check is reported as failed',
+    named(checks, 'endpoint genesis matches devnet')?.status === 'failed',
+    checks.map((c) => `${c.name}=${c.status}`).join(', '),
+  );
+  check(
+    'and the reason is the fixed sentence for an endpoint that did not answer',
+    named(checks, 'endpoint genesis matches devnet')?.detail === ENDPOINT_UNREACHABLE,
+    named(checks, 'endpoint genesis matches devnet')?.detail,
+  );
+  check(
+    'nothing that was never asked is reported as a result',
+    named(checks, 'payer SOL balance')?.status === 'not_evaluated' &&
+      named(checks, 'payer holds devnet USDC')?.status === 'not_evaluated',
+    checks.map((c) => `${c.name}=${c.status}`).join(', '),
+  );
+  check(
+    'the endpoint was asked once and not once per check',
+    endpoint.asked() === 1,
+    `${endpoint.asked()} requests`,
+  );
+}
+
+/**
+ * PRE-TIME-002. A run against a silent endpoint is not ready, and says so in stable words.
+ *
+ * The second half is what keeps this useful to whoever reads the output: a check that did not run
+ * must not read as one that passed, and no text an endpoint supplied may appear in either.
+ */
+recordExecution('PRE-TIME-002');
+{
+  const checks = await checkChainState(VALID_RECIPIENT, UNREACHABLE_RPC_URL, {
+    rpc: silentEndpoint(),
+    timeoutMs: 250,
+  });
+  const ready = !checks.some((c) => c.status !== 'ok' && c.status !== 'note');
+
+  check('a silent endpoint leaves the run not ready', ready === false);
+  check(
+    'no check claims to have observed anything',
+    checks.every((c) => c.status !== 'ok'),
+    checks.map((c) => `${c.name}=${c.status}`).join(', '),
+  );
+  check(
+    'and every detail is text this repository wrote',
+    checks.every((c) => c.detail === ENDPOINT_UNREACHABLE || c.detail === 'the endpoint did not answer'),
+    checks.map((c) => c.detail).join(' | '),
   );
 }
 
