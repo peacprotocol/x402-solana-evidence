@@ -11,7 +11,15 @@ if [ ! -f "$BIN" ]; then
   echo "compat gate FAILED: @typescript/typescript6 is not installed" >&2
   exit 1
 fi
-VER="$(node -p "require('./node_modules/@typescript/typescript6/package.json').version")"
-echo "TypeScript compatibility gate: $VER"
+# Two different versions, and reporting the wrong one makes this gate claim something it did not
+# check. The package version is the version of the wrapper that ships the compiler; the compiler
+# that actually runs reports its own, and they are not the same number. What the sources were
+# checked under is the second one, so it is taken from the binary that is about to run and is the
+# one the result below is stated against.
+COMPILER="$("$BIN" --version)"
+WRAPPER="$(node -p "require('./node_modules/@typescript/typescript6/package.json').version")"
+echo "TypeScript compatibility gate"
+echo "  compiler: $COMPILER"
+echo "  wrapper package @typescript/typescript6: $WRAPPER"
 "$BIN" --noEmit
-echo "compat: clean under $VER"
+echo "compat: clean under the compiler above ($COMPILER)"
