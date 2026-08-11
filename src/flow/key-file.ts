@@ -25,16 +25,17 @@ export function displayKeyPath(path: string): string {
 
 /** An existing key file that could not be loaded. Never raised for a file that does not exist. */
 export class InvalidKeyFileError extends Error {
-  constructor(
-    readonly path: string,
-    readonly reason: string,
-  ) {
+  readonly path: string;
+  readonly reason: string;
+  constructor(path: string, reason: string) {
     super(
       `Existing key file is invalid. It was not modified. ` +
         `Move or repair ${displayKeyPath(path)} explicitly before continuing.\n` +
         `  reason: ${reason}`,
     );
     this.name = 'InvalidKeyFileError';
+    this.path = path;
+    this.reason = reason;
   }
 }
 

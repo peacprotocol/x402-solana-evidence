@@ -60,16 +60,17 @@ export const SUPPLIED_KEY_CAVEAT = [
 ].join('\n  ');
 
 export class InvalidPublicKeyFileError extends Error {
-  constructor(
-    readonly path: string,
-    readonly reason: string,
-  ) {
+  readonly path: string;
+  readonly reason: string;
+  constructor(path: string, reason: string) {
     super(
       `Public key file cannot be used: ${displayKeyPath(path)}\n` +
         `  reason: ${reason}\n` +
         '  expected: {"algorithm":"Ed25519","kid":...,"issuer":...,"publicKey":<64 hex chars>}',
     );
     this.name = 'InvalidPublicKeyFileError';
+    this.path = path;
+    this.reason = reason;
   }
 }
 

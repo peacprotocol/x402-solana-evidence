@@ -32,7 +32,11 @@ export class FixtureExactWallet implements SchemeNetworkClient {
   readonly scheme = 'exact';
 
   /** Fixed so a repeated offline run produces identical bytes. */
-  constructor(private readonly paymentId: string = F.PAYMENT_ID) {}
+  private readonly paymentId: string;
+
+  constructor(paymentId: string = F.PAYMENT_ID) {
+    this.paymentId = paymentId;
+  }
 
   async createPaymentPayload(
     x402Version: number,

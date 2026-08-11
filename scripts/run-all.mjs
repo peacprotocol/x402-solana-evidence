@@ -41,6 +41,13 @@ const STEPS = [
   { name: 'key persistence', step: suite('src/test-keys.ts') },
   { name: 'preflight revalidation', step: suite('src/test-preflight.ts') },
   { name: 'offline end-to-end flow', step: suite('src/flow/fixture-e2e.ts') },
+  // The CI no-network job runs this file under plain node, whose strip-only TypeScript mode
+  // rejects syntax that tsx compiles away (parameter properties, enums). Running it here under
+  // plain node keeps that whole class of failure catchable without a container runtime.
+  {
+    name: 'offline flow under type-stripping node',
+    step: { command: process.execPath, args: ['src/flow/fixture-e2e.ts'] },
+  },
   { name: 'security, replay, binding and tamper matrix', step: suite('src/test-svm-matrix.ts') },
   { name: 'evidence emission and verification', step: suite('src/test-evidence.ts') },
   { name: 'typecheck (primary)', step: { command: process.execPath, args: [TSC, '--noEmit'] } },

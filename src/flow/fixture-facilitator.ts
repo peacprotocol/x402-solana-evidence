@@ -101,10 +101,13 @@ class FixtureExactSvmFacilitator implements SchemeNetworkFacilitator {
    */
   private readonly settlementCache = new SettlementCache();
 
-  constructor(
-    private readonly behavior: FixtureFacilitatorBehavior,
-    private readonly calls: FixtureFacilitatorCalls,
-  ) {}
+  private readonly behavior: FixtureFacilitatorBehavior;
+  private readonly calls: FixtureFacilitatorCalls;
+
+  constructor(behavior: FixtureFacilitatorBehavior, calls: FixtureFacilitatorCalls) {
+    this.behavior = behavior;
+    this.calls = calls;
+  }
 
   getExtra(): Record<string, unknown> {
     return { feePayer: F.FEE_PAYER };

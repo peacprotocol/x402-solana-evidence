@@ -243,15 +243,14 @@ export class EvidenceCollisionError extends Error {
    * @param path - The path that is already occupied.
    * @param what - What that path was going to hold, so the message names the actual conflict.
    */
-  constructor(
-    readonly path: string,
-    what = 'Evidence',
-  ) {
+  readonly path: string;
+  constructor(path: string, what = 'Evidence') {
     super(
       `${what} already exists at ${path}\n` +
         "  It was not modified, and nothing was written. A run's outputs belong to that run.",
     );
     this.name = 'EvidenceCollisionError';
+    this.path = path;
   }
 }
 
