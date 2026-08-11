@@ -4,6 +4,14 @@
   "private": true,
   "type": "module",
   "description": "Reference implementation for portable, offline-verifiable evidence around x402 v2 SVM exact payment flows on Solana.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/peacprotocol/x402-solana-evidence.git"
+  },
+  "homepage": "https://peacprotocol.org/examples/x402/solana",
+  "bugs": {
+    "url": "https://github.com/peacprotocol/x402-solana-evidence/issues"
+  },
   "license": "Apache-2.0",
   "engines": {
     "node": ">=22.13.0"
