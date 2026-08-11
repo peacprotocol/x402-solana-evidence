@@ -242,6 +242,23 @@ export const ACCEPTANCE_CASES = {
   'KEY-FC-004': { description: 'an issuer key file with an unusable private key is refused and left unchanged', scope: 'local' },
 
   /**
+   * The issuer a stored key claims.
+   *
+   * A key file that stores only a key lets one key and one key identifier claim a different issuer
+   * on every run, purely because an environment variable changed, and every one of those records
+   * verifies under the same public key. The issuer is therefore written into the key file when the
+   * key is created, and a later run configured for a different one stops without modifying
+   * anything. Nothing is migrated and nothing is guessed: what an identity means is a decision for
+   * the person running it.
+   */
+  'ISS-BIND-001': { description: 'creating a devnet issuer key records the issuer it will claim', scope: 'local' },
+  'ISS-BIND-002': { description: 'reloading under the recorded issuer returns the same key', scope: 'local' },
+  'ISS-BIND-003': { description: 'a run configured for a different issuer is refused', scope: 'local' },
+  'ISS-BIND-004': { description: 'a refused issuer binding leaves the key file byte-identical', scope: 'local' },
+  'ISS-BIND-005': { description: 'a key file recording no issuer is refused with what to do about it', scope: 'local' },
+  'ISS-BIND-006': { description: 'an ambiguous key file, and a configured issuer this example will not sign under, are both refused', scope: 'local' },
+
+  /**
    * Preflight revalidation and recipient validation. Only the pre-network failure paths are
    * exercised here, which is exactly what these cases are about: a live run must stop on local
    * grounds before it reaches for a connection, and that is decidable offline. The passing live
