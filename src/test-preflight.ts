@@ -20,13 +20,18 @@ import { join } from 'node:path';
 import { SOLANA_DEVNET_CAIP2, USDC_DEVNET_ADDRESS } from '@x402/svm';
 import type { FacilitatorClient } from '@x402/core/server';
 import { beginAcceptanceSuite, recordExecution } from './acceptance-ids.ts';
+import { TOKEN_PROGRAM_ADDRESS, findAssociatedTokenPda } from '@solana-program/token';
+import { address } from '@solana/kit';
 import {
   checkChainState,
   checkLocalConfiguration,
+  checkRecipientReadiness,
   distinctRolesCheck,
   runPreflight,
+  RECIPIENT_READINESS_CHECK,
   type ChainStateRpc,
   type PreflightCheck,
+  type RecipientReadinessRpc,
 } from './flow/preflight.ts';
 import { ENDPOINT_UNREACHABLE } from './flow/observe-transaction.ts';
 import { createPayerKeyFile } from './flow/payer-key.ts';
@@ -190,7 +195,8 @@ console.log('\nPreflight: an endpoint that does not answer\n');
  * that was accepted, and nothing coming back. Nothing here opens a socket; the promise simply never
  * settles unless the caller's own deadline rejects it, which is precisely the behaviour under test.
  */
-function silentEndpoint(): ChainStateRpc & { readonly asked: () => number } {
+function silentEndpoint(): ChainStateRpc &
+  RecipientReadinessRpc & { readonly asked: () => number } {
   let asked = 0;
   const pending = () => ({
     send: (config?: { abortSignal?: AbortSignal }) => {
@@ -220,7 +226,8 @@ function silentEndpoint(): ChainStateRpc & { readonly asked: () => number } {
     getGenesisHash: pending,
     getBalance: pending,
     getTokenAccountsByOwner: pending,
-  } as unknown as ChainStateRpc & { readonly asked: () => number };
+    getAccountInfo: pending,
+  } as unknown as ChainStateRpc & RecipientReadinessRpc & { readonly asked: () => number };
 }
 
 /**
@@ -290,6 +297,229 @@ recordExecution('PRE-TIME-002');
     checks.every((c) => c.detail === ENDPOINT_UNREACHABLE || c.detail === 'the endpoint did not answer'),
     checks.map((c) => c.detail).join(' | '),
   );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Whether the recipient can receive the asset at all.
+// ---------------------------------------------------------------------------------------------
+
+console.log('\nPreflight: the account the transfer actually names\n');
+
+/**
+ * The token-2022 program address, written out rather than imported.
+ *
+ * It is used here only as a second, different owning program, to show that the derived address
+ * follows whichever program the mint names. Naming it as a dependency would add a package to this
+ * example for a value that appears in one test and is a fixed, published program address.
+ */
+const TOKEN_2022_PROGRAM_ADDRESS = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
+
+interface FakeAccount {
+  readonly owner: string;
+  readonly data: unknown;
+}
+
+/**
+ * An endpoint that answers about the accounts it was given, and records what it was asked.
+ *
+ * Which address was looked up is the property most of these cases are about, so it is observed
+ * rather than inferred from the verdict: a check that accepted an account at some other address
+ * would otherwise look exactly like one that derived the right address.
+ */
+function accountEndpoint(
+  accounts: ReadonlyMap<string, FakeAccount>,
+): RecipientReadinessRpc & { readonly asked: () => readonly string[] } {
+  const asked: string[] = [];
+  return {
+    getAccountInfo: (queried: string) => ({
+      send: async () => {
+        asked.push(String(queried));
+        return { value: accounts.get(String(queried)) ?? null };
+      },
+    }),
+    asked: () => asked,
+  } as unknown as RecipientReadinessRpc & { readonly asked: () => readonly string[] };
+}
+
+/** A mint account, whose only member this check reads is the program that owns it. */
+const mintOwnedBy = (programAddress: string): FakeAccount => ({
+  owner: programAddress,
+  data: { program: 'spl-token', parsed: { type: 'mint', info: { decimals: 6 } } },
+});
+
+const tokenAccount = (
+  programAddress: string,
+  mint: string,
+  owner: string,
+  state = 'initialized',
+): FakeAccount => ({
+  owner: programAddress,
+  data: { program: 'spl-token', parsed: { type: 'account', info: { mint, owner, state } } },
+});
+
+/** The address the transfer names, derived here independently of the code under test. */
+const derivedAta = async (owner: string, tokenProgram: string): Promise<string> =>
+  String(
+    (
+      await findAssociatedTokenPda({
+        mint: address(USDC_DEVNET_ADDRESS),
+        owner: address(owner),
+        tokenProgram: address(tokenProgram),
+      })
+    )[0],
+  );
+
+const readiness = (
+  payTo: string,
+  endpoint: RecipientReadinessRpc,
+): Promise<PreflightCheck> =>
+  checkRecipientReadiness(payTo, UNREACHABLE_RPC_URL, { rpc: endpoint, timeoutMs: 250 });
+
+recordExecution('PRE-ATA-001');
+{
+  const ata = await derivedAta(VALID_RECIPIENT, TOKEN_PROGRAM_ADDRESS);
+  const endpoint = accountEndpoint(
+    new Map([
+      [USDC_DEVNET_ADDRESS, mintOwnedBy(TOKEN_PROGRAM_ADDRESS)],
+      [ata, tokenAccount(TOKEN_PROGRAM_ADDRESS, USDC_DEVNET_ADDRESS, VALID_RECIPIENT)],
+    ]),
+  );
+  const result = await readiness(VALID_RECIPIENT, endpoint);
+
+  check('an initialized account at the derived address satisfies the check', result.status === 'ok', result.detail);
+  check('it is the named readiness check', result.name === RECIPIENT_READINESS_CHECK, result.name);
+  check(
+    'and it says what it found, in this repository\'s own words',
+    result.detail === 'the derived associated token account is initialized',
+    result.detail,
+  );
+  check('the mint is read first, so the owning program is known before anything is derived', endpoint.asked()[0] === USDC_DEVNET_ADDRESS, endpoint.asked().join(', '));
+  check(
+    'and the account looked up is the one the transfer names',
+    endpoint.asked()[1] === ata,
+    `asked ${endpoint.asked()[1]}, expected ${ata}`,
+  );
+}
+
+recordExecution('PRE-ATA-002');
+{
+  // The mint answers; the derived account does not exist. This is the first run of a recipient
+  // that has never held this asset, which every other check in this preflight passes.
+  const endpoint = accountEndpoint(
+    new Map([[USDC_DEVNET_ADDRESS, mintOwnedBy(TOKEN_PROGRAM_ADDRESS)]]),
+  );
+  const result = await readiness(VALID_RECIPIENT, endpoint);
+
+  check('an absent account leaves the recipient not ready', result.status === 'failed', result.detail);
+  check(
+    'and the reason names the account rather than the address',
+    result.detail === 'the derived devnet USDC associated token account is not initialized',
+    result.detail,
+  );
+}
+
+recordExecution('PRE-ATA-003');
+{
+  // The same recipient and the same mint, owned by the other token program: a different derived
+  // address. An account at the address the first program would have produced must not satisfy it.
+  const underTokenProgram = await derivedAta(VALID_RECIPIENT, TOKEN_PROGRAM_ADDRESS);
+  const underToken2022 = await derivedAta(VALID_RECIPIENT, TOKEN_2022_PROGRAM_ADDRESS);
+  const endpoint = accountEndpoint(
+    new Map([
+      [USDC_DEVNET_ADDRESS, mintOwnedBy(TOKEN_2022_PROGRAM_ADDRESS)],
+      [
+        underTokenProgram,
+        tokenAccount(TOKEN_PROGRAM_ADDRESS, USDC_DEVNET_ADDRESS, VALID_RECIPIENT),
+      ],
+    ]),
+  );
+  const result = await readiness(VALID_RECIPIENT, endpoint);
+
+  check('the two owning programs derive different addresses', underTokenProgram !== underToken2022);
+  check(
+    'the address looked up follows the program the mint names',
+    endpoint.asked()[1] === underToken2022,
+    `asked ${endpoint.asked()[1]}, expected ${underToken2022}`,
+  );
+  check(
+    'an initialized account at the other program\'s address does not satisfy it',
+    result.status === 'failed',
+    result.detail,
+  );
+}
+
+recordExecution('PRE-ATA-004');
+{
+  const ata = await derivedAta(VALID_RECIPIENT, TOKEN_PROGRAM_ADDRESS);
+  const otherOwner = '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM';
+  const otherMint = 'So11111111111111111111111111111111111111112';
+  const at = async (account: FakeAccount): Promise<PreflightCheck> =>
+    readiness(
+      VALID_RECIPIENT,
+      accountEndpoint(
+        new Map([
+          [USDC_DEVNET_ADDRESS, mintOwnedBy(TOKEN_PROGRAM_ADDRESS)],
+          [ata, account],
+        ]),
+      ),
+    );
+  const mismatch =
+    'the account at the derived address is not a devnet USDC account for the configured recipient';
+
+  const wrongOwner = await at(tokenAccount(TOKEN_PROGRAM_ADDRESS, USDC_DEVNET_ADDRESS, otherOwner));
+  const wrongMint = await at(tokenAccount(TOKEN_PROGRAM_ADDRESS, otherMint, VALID_RECIPIENT));
+  const notAToken = await at({ owner: TOKEN_PROGRAM_ADDRESS, data: ['AQID', 'base64'] });
+  const uninitialized = await at(
+    tokenAccount(TOKEN_PROGRAM_ADDRESS, USDC_DEVNET_ADDRESS, VALID_RECIPIENT, 'uninitialized'),
+  );
+
+  check('an account naming a different owner does not satisfy it', wrongOwner.status === 'failed', wrongOwner.detail);
+  check('an account naming a different mint does not satisfy it', wrongMint.status === 'failed', wrongMint.detail);
+  check('an answer that is not a parsed token account does not satisfy it', notAToken.status === 'failed', notAToken.detail);
+  check('an account that exists without being initialized does not satisfy it', uninitialized.status === 'failed', uninitialized.detail);
+  check(
+    'and a mismatch says what it found rather than blaming the recipient',
+    wrongOwner.detail === mismatch && wrongMint.detail === mismatch,
+    `${wrongOwner.detail} | ${wrongMint.detail}`,
+  );
+}
+
+recordExecution('PRE-ATA-005');
+{
+  const started = Date.now();
+  const silent = await readiness(VALID_RECIPIENT, silentEndpoint());
+  const elapsed = Date.now() - started;
+
+  check('an endpoint that never answers returns rather than waiting', elapsed < 10_000, `${elapsed}ms`);
+  check('and becomes a named failure', silent.status === 'failed', silent.detail);
+  check(
+    'whose reason is the fixed sentence for an endpoint that did not answer',
+    silent.detail === ENDPOINT_UNREACHABLE,
+    silent.detail,
+  );
+
+  // The other half: a recipient that is already invalid is decided locally, and nothing about it
+  // is asked of any endpoint. The readiness check needs a network, so it must not appear at all.
+  const payerKeyPath = join(workspace, 'readiness-payer.json');
+  await createPayerKeyFile(payerKeyPath);
+  const { client, asked } = watchfulFacilitator();
+  const report = await runPreflight({
+    network: SOLANA_DEVNET_CAIP2,
+    payTo: 'not-an-address',
+    asset: USDC_DEVNET_ADDRESS,
+    rpcUrl: UNREACHABLE_RPC_URL,
+    facilitatorClient: client,
+    payerKeyMode: 'require-existing',
+    payerKeyPath,
+  });
+
+  check('an invalid recipient is not ready', report.ready === false);
+  check(
+    'and nothing was asked about an account it could not derive',
+    named(report.checks, RECIPIENT_READINESS_CHECK) === undefined,
+    report.checks.map((c) => c.name).join(', '),
+  );
+  check('nor was the facilitator asked anything', asked() === false);
 }
 
 console.log('\nPreflight: which recipients are addresses\n');

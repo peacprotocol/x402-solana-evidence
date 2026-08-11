@@ -115,7 +115,10 @@ The preflight checks everything before anything is signed:
    endpoint fails here rather than halfway through a payment;
 4. the payer holds enough devnet USDC. Its SOL balance is reported but required of nothing: see
    below;
-5. the configured facilitator advertises the exact scheme on that network.
+5. the recipient can receive devnet USDC. The x402 SVM exact transfer targets the associated token
+   account derived from the configured recipient and the devnet USDC mint. The preflight verifies
+   that account is initialized before a payment can be attempted;
+6. the configured facilitator advertises the exact scheme on that network.
 
 It fails closed and prints the payer address you need to fund.
 

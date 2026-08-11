@@ -273,6 +273,21 @@ export const ACCEPTANCE_CASES = {
   'PRE-ADDR-004': { description: 'a recipient carrying whitespace is rejected rather than trimmed', scope: 'local' },
 
   /**
+   * Whether the recipient can receive the asset, at the account the transfer actually names.
+   *
+   * A valid address is not yet a payable one. The exact SVM transfer moves tokens to the
+   * associated token account derived from the recipient and the mint, and the payment the client
+   * builds does not create that account. So the destination is derived exactly as the payment
+   * derives it, including reading the mint's owning program rather than assuming one, and looked
+   * up. Exercised against an injected endpoint: the cases need answers, not a network.
+   */
+  'PRE-ATA-001': { description: 'an initialized associated token account at the derived address satisfies the check', scope: 'local' },
+  'PRE-ATA-002': { description: 'an absent associated token account is a named not-ready failure', scope: 'local' },
+  'PRE-ATA-003': { description: 'the address looked up is derived from the mint\'s owning program, not a fixed one', scope: 'local' },
+  'PRE-ATA-004': { description: 'an account naming a different mint or owner does not satisfy the check', scope: 'local' },
+  'PRE-ATA-005': { description: 'the readiness check is bounded when unreachable, and unasked when the recipient is already invalid', scope: 'local' },
+
+  /**
    * An endpoint that answers nothing.
    *
    * The failure without an error: the request is accepted and nothing comes back. Exercised against

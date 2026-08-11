@@ -99,6 +99,9 @@ const REQUIRED_EXPORTS: Record<string, readonly string[]> = {
     'generatePaymentId',
   ],
   '@x402/extensions/builder-code': ['BUILDER_CODE', 'declareBuilderCodeExtension'],
+  // The preflight derives the account an exact SVM transfer names, using the same associated
+  // token address derivation the client uses, parameterized on the program the mint names.
+  '@solana-program/token': ['findAssociatedTokenPda', 'TOKEN_PROGRAM_ADDRESS'],
 };
 const REQUIRED_SUBPATHS = Object.keys(REQUIRED_EXPORTS);
 
@@ -117,6 +120,9 @@ const EXPECTED_VERSION = X402_PINNED_VERSION;
 const PINNED_PEERS: Record<string, string> = {
   express: '5.2.1',
   '@solana/kit': '5.5.1',
+  // Already in the dependency graph as the version `@x402/svm` resolves; pinned directly so the
+  // preflight derives a payment destination through the same instance the payment itself uses.
+  '@solana-program/token': '0.9.0',
 };
 
 let failures = 0;
