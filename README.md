@@ -16,8 +16,9 @@ facilitator injected into the run, over synthetic transaction artifacts rather t
 payment. It needs no network and reproduces byte for byte, so the committed evidence in
 `fixtures/expected-evidence/` can be verified from a checkout, from the files and a public key
 alone. The second path runs the same evidence pipeline against a real payment on Solana Devnet; it
-is a documented manual step, not part of continuous integration, and its live acceptance case is
-pending.
+is a documented manual step, not part of continuous integration. It was demonstrated on 2026-08-20
+against a real Solana Devnet transaction; see
+[Live Devnet Acceptance](docs/LIVE_DEVNET_ACCEPTANCE.md).
 
 Start with the [walkthrough](docs/WALKTHROUGH.md) for the full command path, the lifecycle state
 machine and the devnet procedure.
@@ -360,8 +361,11 @@ Acceptance cases carry stable identifiers declared in `src/acceptance-ids.ts`. T
 each one as it executes and `pnpm test:acceptance` fails if a declared case did not run, so
 coverage cannot regress while the counts keep looking healthy. Four cases are scoped to continuous
 integration, because a single local process cannot reproduce them: two repeated-run byte
-comparisons and two runs with networking disabled. One case is scoped to live acceptance and is
-reported as pending until someone performs a devnet run, never as a result.
+comparisons and two runs with networking disabled. One case is scoped to live acceptance; the
+automated matrix reports it as pending because the local suite never executes a real Solana
+Devnet transaction itself, by design. It has been performed manually, once, and that result is
+recorded separately in [Live Devnet Acceptance](docs/LIVE_DEVNET_ACCEPTANCE.md), never inferred
+from the automated report.
 
 One case is deliberately narrower than its name suggests, and the registry says so where it is
 declared: whether an SVM fee payer is isolated from the transfer it pays for is decided by the
@@ -376,7 +380,10 @@ is fabricated placeholder text.
 
 Payment signatures, payer identifiers, receipts and transaction references can be sensitive. Public
 evidence is digest-only by default; raw artifacts stay private outside fixture mode. No private key
-or payment authorization belongs in this repository, its logs, or a recorded demonstration.
+or payment authorization belongs in this repository, its logs, or a recorded demonstration. A
+deliberate exception — a completed, disposable, test-network evidence set reviewed for privacy
+before release — is described in [SECURITY.md](SECURITY.md) and was used for the `v0.1.0` live
+Devnet evidence archive.
 
 ## Licence
 
