@@ -140,6 +140,11 @@ export async function runOnce(options: RunOptions = {}): Promise<RunResult> {
         baseUrl: `http://127.0.0.1:${port}`,
         network: SOLANA_DEVNET_CAIP2,
         registerSchemes: (c) => {
+          // @x402/core 2.23.0 added a client spend-control allowlist that, by default, only
+          // recognizes each scheme's own network-default assets. The fixture wallet pays the
+          // fixed devnet USDC mint this whole run is defined around, so it is named explicitly
+          // rather than left to fall through the default-asset recognition path.
+          c.setSpendControls({ allowedAssets: [{ network: SOLANA_DEVNET_CAIP2, asset: F.ASSET_MINT }] });
           c.register(SOLANA_DEVNET_CAIP2, new FixtureExactWallet(F.PAYMENT_ID));
         },
         ...(options.alterPayment !== undefined ? { alterPayment: options.alterPayment } : {}),
