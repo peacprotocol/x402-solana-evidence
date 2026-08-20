@@ -34,7 +34,10 @@ import type { AddressInfo } from 'node:net';
 import { HTTPFacilitatorClient } from '@x402/core/server';
 import { SOLANA_DEVNET_CAIP2, USDC_DEVNET_ADDRESS, DEVNET_RPC_URL, toClientSvmSigner } from '@x402/svm';
 import { registerExactSvmScheme as registerServerScheme } from '@x402/svm/exact/server';
-import { registerExactSvmScheme as registerClientScheme } from '@x402/svm/exact/client';
+import {
+  ExactSvmScheme,
+  registerExactSvmScheme as registerClientScheme,
+} from '@x402/svm/exact/client';
 import {
   PAYMENT_IDENTIFIER,
   declarePaymentIdentifierExtension,
@@ -267,10 +270,29 @@ export async function main(): Promise<void> {
         baseUrl: `http://127.0.0.1:${port}`,
         network: SOLANA_DEVNET_CAIP2,
         registerSchemes: (client) => {
+          // @x402/core 2.23.0 added a client spend-control allowlist that, by default, only
+          // recognizes each scheme's own network-default assets. This run always pays the fixed
+          // devnet USDC mint declared above, so it is named explicitly rather than left to fall
+          // through the default-asset recognition path.
+          client.setSpendControls({
+            allowedAssets: [{ network: SOLANA_DEVNET_CAIP2, asset: USDC_DEVNET_ADDRESS }],
+          });
           registerClientScheme(client, {
             signer: toClientSvmSigner(payer),
             networks: [SOLANA_DEVNET_CAIP2],
           });
+          // `registerExactSvmScheme`'s client-side config has no `rpcUrl` field and never forwards
+          // one to the scheme it constructs (unlike the server-side registration above), so the
+          // client's own mint-metadata RPC call is otherwise always the public devnet endpoint even
+          // when a faster custom RPC is configured server-side. `ExactSvmScheme` itself does accept
+          // an `rpcUrl` as a second constructor argument, so it is constructed directly here,
+          // replacing just the "exact" scheme the call above registered for this one network.
+          client.register(
+            SOLANA_DEVNET_CAIP2,
+            new ExactSvmScheme(toClientSvmSigner(payer), {
+              rpcUrl: process.env['PEAC_EXAMPLE_RPC_URL'] ?? DEVNET_RPC_URL,
+            }),
+          );
         },
       },
       `${RESOURCE_PATH}${RESOURCE_QUERY}`,

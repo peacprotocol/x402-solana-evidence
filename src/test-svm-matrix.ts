@@ -137,6 +137,10 @@ async function startOrigin(behavior: FixtureFacilitatorBehavior = {}): Promise<O
 /** The upstream client, paying through the offline wallet stand-in. */
 function upstreamClient(paymentId: string = F.PAYMENT_ID): x402HTTPClient {
   const client = new x402Client();
+  // @x402/core 2.23.0 added a client spend-control allowlist that, by default, only recognizes
+  // each scheme's own network-default assets. This suite always pays the fixed fixture asset, so
+  // it is named explicitly rather than left to fall through the default-asset recognition path.
+  client.setSpendControls({ allowedAssets: [{ network: SOLANA_DEVNET_CAIP2, asset: F.ASSET_MINT }] });
   client.register(SOLANA_DEVNET_CAIP2, new FixtureExactWallet(paymentId));
   return new x402HTTPClient(client);
 }
