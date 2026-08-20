@@ -286,7 +286,7 @@ demonstrates and how far each part has actually been exercised.
 | request binding and origin-result binding | implemented |
 | deterministic validation vectors and rejection corpus | implemented |
 | offline x402 lifecycle reference | implemented, deterministic, no onchain payment |
-| live Solana Devnet USDC payment | acceptance pending; the manual procedure is in the [walkthrough](docs/WALKTHROUGH.md) |
+| live Solana Devnet USDC payment | demonstrated 2026-08-20; see [Live Devnet Acceptance](docs/LIVE_DEVNET_ACCEPTANCE.md) |
 | separate Solana RPC observation | implemented for the live run; optional, and recorded as unavailable when the endpoint cannot answer |
 | PEAC signed record issuance | implemented |
 | offline verification from files and a public key | implemented |
