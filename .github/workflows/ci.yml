@@ -84,8 +84,8 @@ jobs:
     env:
       # The runtime for the no-network gate, pinned by digest for the same reason the actions above
       # are pinned by commit SHA: a tag can be repointed, a digest cannot. This is the multi-platform
-      # index digest of the node:24 tag, which is Node 24.19.0 at the time of pinning.
-      OFFLINE_NODE_IMAGE: 'node:24@sha256:934240a162082fd8b8a2f90cd5114446443f1eba1c5378f6687167ca405e6584'
+      # index digest of the node:24 tag, which is Node 24.20.0 at the time of pinning.
+      OFFLINE_NODE_IMAGE: 'node:24@sha256:be23f54a88d34e8824c741b19b91064094f92c1c97b194144bfc8b50d67258e2'
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
