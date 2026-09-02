@@ -1,9 +1,7 @@
 # Live Devnet Acceptance
 
 - **Date:** 2026-09-02 (UTC)
-- **Source commit:** `b16eccd` on branch `fix/chain-observation-schema-conformance`, the commit that
-  moved this reference to x402 2.24.0 and added the pending settlement state; the run is bound to
-  that tree, and a run against the merged commit is a separate acceptance
+- **Source commit:** `09a626b` on `main`, the tree released as `v0.1.1`
 - **Network:** Solana Devnet (`solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1`)
 - **Runtime:** Node 24.20.0, pnpm 8.15.0
 - **x402 packages:** `@x402/core`, `@x402/express`, `@x402/extensions`, `@x402/svm` at 2.24.0
@@ -12,7 +10,13 @@
 
 ## What happened
 
-A live x402 v2 SVM `exact` payment flow ran against Solana Devnet, end to end, through this
+Before the payment, the repository was installed from its lockfile into an empty `node_modules`
+and the complete local suite ran green on this commit: every suite, both typechecks, the
+acceptance-completeness gate, the offline verification and tamper demonstrations, the two
+determinism comparisons, and the offline flow under plain Node. Continuous integration on the same
+commit passed on Node 22, Node 24, the container with networking disabled, and the secret scan.
+
+A live x402 v2 SVM `exact` payment flow then ran against Solana Devnet, end to end, through this
 example's implementation:
 
 1. A client requested a resource without payment and received a `PAYMENT-REQUIRED` challenge.
@@ -38,8 +42,8 @@ example's implementation:
 
 ## Transaction
 
-- **Signature:** `2ubP1YWskv44wtDWfoqfy3v8p6pxmgxHZv9irUPJNB7gH4n4gDbhjrA4bTQS6xzWFM4JytW4vmnXvDJPt5mFbMzZ`
-- **Explorer:** https://explorer.solana.com/tx/2ubP1YWskv44wtDWfoqfy3v8p6pxmgxHZv9irUPJNB7gH4n4gDbhjrA4bTQS6xzWFM4JytW4vmnXvDJPt5mFbMzZ?cluster=devnet
+- **Signature:** `4DdokRYKwnXERc9uAsLN2iaJUtNuTwKrdKkSVAbk6ogmApBno7GzbqS4C5FSCxbr5hbyMcXooNbCfa6Qt2RRxMiW`
+- **Explorer:** https://explorer.solana.com/tx/4DdokRYKwnXERc9uAsLN2iaJUtNuTwKrdKkSVAbk6ogmApBno7GzbqS4C5FSCxbr5hbyMcXooNbCfa6Qt2RRxMiW?cluster=devnet
 - **Amount:** 10000 base units (0.01 USDC, 6 decimals) of devnet USDC mint `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`
 - **Terminal state:** `response_write_attempted`
 - **Settlement outcome:** `succeeded`
@@ -63,11 +67,11 @@ transaction reference, independently of the facilitator):
 
 - Source: `https://api.devnet.solana.com`
 - Status: `observed`
-- Slot: `492071131`
+- Slot: `492113867`
 - Commitment: `confirmed`, as reported at the moment the run asked
 - Statement: "RPC https://api.devnet.solana.com reported transaction
-  2ubP1YWskv44wtDWfoqfy3v8p6pxmgxHZv9irUPJNB7gH4n4gDbhjrA4bTQS6xzWFM4JytW4vmnXvDJPt5mFbMzZ at slot
-  492071131 with commitment confirmed at time 2026-09-02T16:48:59.000Z."
+  4DdokRYKwnXERc9uAsLN2iaJUtNuTwKrdKkSVAbk6ogmApBno7GzbqS4C5FSCxbr5hbyMcXooNbCfa6Qt2RRxMiW at slot
+  492113867 with commitment confirmed at time 2026-09-02T18:47:04.000Z."
 
 A later query of the same endpoint, made by hand after the run and not part of the evidence,
 reported the transaction at the same slot with commitment `finalized` and no error. That later
@@ -107,7 +111,7 @@ again against the mutated copy under the same public key. Verification failed, n
 checks that caught the change:
 
 ```
-  FAIL  chain observation digest: recomputed sha256:ac38b621baa0ac831f70654a6ba61ecc6894b00f3d120dc8cc8f071ee5036776, record binds sha256:4c767d33701d1923b247bfa3cd505929854dbce89177a3337e9d87d0968ee48c
+  FAIL  chain observation digest: recomputed sha256:f1ce68c04f4a46b8716d0ac16ff24272a12bddf15d36ed8aae1d186d94b23898, record binds sha256:072bc4a86dbdd6488aa5c36321ededc3ca62b9436ed50a780489c60900ce67da
   FAIL  record and observation name the same amount: the record carries 10000, the observation carries 99999
 ```
 
@@ -120,7 +124,8 @@ The evidence directory itself is not checked into git; only this document is. Ra
 artifacts follow this repository's [`SECURITY.md`](../SECURITY.md) publication policy ("Publishing
 live evidence"), which keeps live payment artifacts private by default and treats a public
 test-network acceptance artifact as a deliberate, reviewed exception attached to a release rather
-than ordinary git history.
+than ordinary git history. The reviewed evidence set for this run is attached to the `v0.1.1`
+release with a checksum file.
 
 To verify an evidence directory you have been given directly:
 
@@ -137,7 +142,16 @@ From the README:
 > does not independently establish blockchain consensus, and it does not make the issuer's account
 > of events authoritative.
 
-## Previous acceptance: 2026-08-20
+## Previous acceptance runs
+
+**2026-09-02, pre-merge.** The same flow ran from commit `b16eccd`, the branch commit that moved
+this reference to x402 2.24.0, before it was merged. Transaction
+`2ubP1YWskv44wtDWfoqfy3v8p6pxmgxHZv9irUPJNB7gH4n4gDbhjrA4bTQS6xzWFM4JytW4vmnXvDJPt5mFbMzZ`, slot
+`492071131`, commitment `confirmed` as reported, 27 of 27 checks passed, and the same one-field
+tamper of a working copy failed by name. It is superseded by the run above, which is bound to the
+merged tree, and is kept here as the record of what was run.
+
+### 2026-08-20
 
 Retained as recorded at the time. It was run at x402 2.23.0 from commit `585af8a` and is the run
 the `v0.1.0` release was cut against. The correction note inside it was added on 2026-09-02.
