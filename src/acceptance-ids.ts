@@ -213,10 +213,9 @@ export const ACCEPTANCE_CASES = {
   /**
    * The Solana chain observation, against its committed schema.
    *
-   * Before this arc, the check named `chain observation local profile` compared the `profile`
-   * member by bare equality and validated nothing else about the document's shape. These cases
-   * hold the whole document to `schemas/solana-chain-observation.v1.schema.json`, the way the
-   * request binding and the origin result binding are already held to theirs.
+   * These cases hold the whole document to `schemas/solana-chain-observation.v1.schema.json`,
+   * the way the request binding and the origin result binding are held to theirs, independently
+   * of the cross-document coherence checks that read the same document.
    */
   'OBS-SCHEMA-001': { description: 'the committed chain observation matches the example-local schema', scope: 'local' },
   'OBS-SCHEMA-002': { description: 'an unknown top-level member is refused', scope: 'local' },

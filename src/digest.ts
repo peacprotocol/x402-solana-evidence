@@ -27,8 +27,9 @@ export function digestBytes(bytes: Uint8Array | string): Sha256Digest {
 }
 
 /**
- * Normalise whatever the protocol helper returns into a Sha256Digest.
- * It already emits the `sha256:` form; this guards against a future change rather than assuming.
+ * Normalise the protocol helper's output to the canonical prefixed `Sha256Digest` form.
+ * The helper emits the `sha256:` form; a bare 64-hex digest is accepted and prefixed, and anything
+ * else is refused rather than passed through.
  */
 export function coerceDigest(v: string): Sha256Digest {
   if (isSha256Digest(v)) return v;

@@ -1215,9 +1215,9 @@ await incoherentCase({
 /**
  * COHERE-007. Another local profile.
  *
- * The chain observation's `profile` member is now held to the committed schema alongside the rest
- * of its shape, so this case is a schema failure rather than a bare equality, and is asserted the
- * same way COHERE-009 and COHERE-010 assert their schema failures below.
+ * The chain observation's `profile` member is constrained by the committed schema alongside the
+ * rest of its shape, so another profile is a schema failure, asserted the same way COHERE-009 and
+ * COHERE-010 assert their schema failures below.
  */
 recordExecution('COHERE-007');
 {
@@ -1246,9 +1246,10 @@ recordExecution('COHERE-007');
  * refused rather than read as though its fields meant what they mean under `exact`. That is a bound
  * on what this example claims to have looked at, not a judgement about the other scheme.
  *
- * The committed schema also constrains `scheme` to `exact`, so a value the manual scheme check
- * would reject now fails the schema check as well; both are two honest statements of the same
- * bound rather than one check masking the other, so both are asserted rather than exactly one.
+ * The committed schema constrains `scheme` to `exact` as well, so another scheme fails the schema
+ * check and the semantic scheme check together. The two deliberately enforce different layers,
+ * structure and meaning, and neither masks the other, so both are asserted rather than exactly
+ * one.
  */
 recordExecution('COHERE-008');
 {
@@ -1380,7 +1381,7 @@ recordExecution('COHERE-011');
 console.log('\nThe chain observation, against its committed schema\n');
 
 /**
- * OBS-SCHEMA-001. The committed evidence, against the schema its chain observation is now held to.
+ * OBS-SCHEMA-001. The committed chain observation satisfies the application-local schema.
  *
  * COHERE-011 already asserts this as part of the full check list; this case names it on its own so
  * the positive result has its own identifier rather than only appearing inside a larger case.

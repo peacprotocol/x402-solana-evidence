@@ -65,8 +65,8 @@ console.log('\nKey persistence\n');
 {
   // The pinned upstream fact this design exists for, asserted rather than assumed. A signer from
   // `generateKeyPairSigner` holds a non-extractable private key, so its bytes can never be written
-  // to a file; creation here starts from private-key bytes instead. If a future release changes
-  // this, the check fails and the decision gets revisited deliberately.
+  // to a file; creation here starts from private-key bytes instead. Persisted-key creation depends
+  // on that property, so it is asserted here rather than assumed.
   const { generateKeyPairSigner } = await import('@solana/kit');
   const generated = await generateKeyPairSigner();
   check(
