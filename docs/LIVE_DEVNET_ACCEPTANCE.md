@@ -67,7 +67,7 @@ check the transaction reference against the network independently.
 Offline verification against the signed record and the supplied public key ran all 25 named checks,
 and all 25 passed:
 
-- record signature, schema, key algorithm, key identifier and key issuer (5 checks)
+- record signature and schema, key algorithm, key identifier and key issuer (4 checks)
 - record type and extension groups (2 checks)
 - digest recomputation for every bound document: request binding, origin result binding, chain
   observation, `PAYMENT-REQUIRED`, `PAYMENT-SIGNATURE`, `PAYMENT-RESPONSE`, and the origin result
@@ -80,6 +80,11 @@ and all 25 passed:
   state, asset, amount, and settlement response digest (5 checks)
 - cross-document consistency between the origin result binding and the chain observation's service
   result digest (1 check)
+
+Correction, 2026-09-02: at `v0.1.0` the check named `chain observation local profile` compared the
+document's `profile` identifier only. Validation of the whole chain observation against a committed
+schema, `schemas/solana-chain-observation.v1.schema.json`, was added after this run; the check name
+and the total are unchanged, and the run above was not repeated to produce this note.
 
 ## Tamper detection
 

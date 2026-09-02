@@ -42,7 +42,8 @@ export interface ObservationSource {
 }
 
 /** How settlement ended, kept separate from the transaction facts it may or may not carry. */
-export type SettlementOutcome = 'succeeded' | 'refused' | 'not_reached';
+export const SETTLEMENT_OUTCOMES = ['succeeded', 'refused', 'not_reached'] as const;
+export type SettlementOutcome = (typeof SETTLEMENT_OUTCOMES)[number];
 
 export interface SolanaChainObservationV1 {
   readonly profile: typeof PROFILE_CHAIN_OBSERVATION;

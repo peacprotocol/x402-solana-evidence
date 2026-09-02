@@ -111,7 +111,10 @@ export function publicEndpointReference(
  * endpoint, and two wordings for one outcome would read as two different outcomes.
  */
 export const ENDPOINT_UNREACHABLE = 'the endpoint could not be reached or did not answer in time';
-const UNKNOWN_TRANSACTION = 'the endpoint reported no status for this transaction';
+export const UNKNOWN_TRANSACTION = 'the endpoint reported no status for this transaction';
+
+/** Every reason this flow may record for an rpc observation it could not make. */
+export const UNAVAILABLE_REASONS = [ENDPOINT_UNREACHABLE, UNKNOWN_TRANSACTION] as const;
 
 function isoOf(observedAtUnixSeconds: number): string {
   return new Date(observedAtUnixSeconds * 1000).toISOString();

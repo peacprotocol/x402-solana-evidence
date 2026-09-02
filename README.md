@@ -355,7 +355,8 @@ pnpm gen:golden                  # regenerate the vectors, then review the diff
 
 Deterministic validation vectors live in `fixtures/golden-v1.json` with hard-coded expected bytes
 and digests, and are cross-checked against a second, independently written RFC 8785 implementation.
-Both binding documents validate against closed JSON Schema 2020-12 files in `schemas/`.
+The request binding, the origin result binding and the chain observation each validate against a
+closed JSON Schema 2020-12 file in `schemas/`.
 
 Acceptance cases carry stable identifiers declared in `src/acceptance-ids.ts`. The suites record
 each one as it executes and `pnpm test:acceptance` fails if a declared case did not run, so

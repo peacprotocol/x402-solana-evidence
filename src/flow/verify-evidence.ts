@@ -57,7 +57,6 @@ import {
 import { resolveIssuerKey } from './issuer-key.ts';
 import { TERMINAL_STATES, type TerminalState } from './lifecycle.ts';
 import { validateLocalProfile, type LocalProfileDocument } from './profile-schema.ts';
-import { PROFILE_CHAIN_OBSERVATION } from './observe-settlement.ts';
 import {
   InvalidPublicKeyFileError,
   PUBLIC_KEY_ALGORITHM,
@@ -423,9 +422,9 @@ export async function verifyEvidence(
    * missing component, an unknown member or a digest string of the wrong shape is reported rather
    * than passed through intact.
    *
-   * EXAMPLE-LOCAL, and the name says so. These schemas describe two documents this repository
-   * invents. Satisfying one is not PEAC conformance and not x402 conformance, and neither profile
-   * is registered anywhere.
+   * EXAMPLE-LOCAL, and the name says so. These schemas describe three documents this repository
+   * invents. Satisfying one is not PEAC conformance and not x402 conformance, and none of the
+   * profiles is registered anywhere.
    *
    * A document that was refused or is absent produces no check here: the digest check above already
    * carries that failure, and restating it as a second one would tell a reader nothing new.
@@ -461,6 +460,11 @@ export async function verifyEvidence(
     'chain observation digest',
     'chain-observation.json',
     evidence['chain_observation_digest'],
+  );
+  checkLocalProfile(
+    'chain observation local profile',
+    'chain-observation.json',
+    'solana-chain-observation',
   );
 
   /** Recompute an observed field value digest from the bytes recorded beside the record. */
@@ -568,18 +572,10 @@ export async function verifyEvidence(
     };
     const observationDocument = observationRead.value as Record<string, unknown>;
 
-    // Which document this is, and which payment scheme it describes. Both are stated by the
-    // producer, so both are checked rather than assumed: an observation carrying another profile,
-    // or another scheme, is not the document the rest of these checks are written against.
-    checks.push(
-      observationDocument['profile'] === PROFILE_CHAIN_OBSERVATION
-        ? pass('chain observation local profile', PROFILE_CHAIN_OBSERVATION)
-        : fail(
-            'chain observation local profile',
-            `expected ${PROFILE_CHAIN_OBSERVATION}, the document names ` +
-              `${describeBound(observationDocument['profile'])}`,
-          ),
-    );
+    // Which payment scheme this observation describes. The profile itself is already held to the
+    // committed schema above, which checks the `profile` member by `const` along with everything
+    // else about the document's shape; restating a bare equality on it here would double-count the
+    // same fact as a second named check.
     checks.push(
       observationDocument['scheme'] === OBSERVED_SCHEME
         ? pass('chain observation scheme', OBSERVED_SCHEME)

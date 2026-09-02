@@ -384,7 +384,7 @@ const OBSERVED_AT = F.FIXED_NOW_UNIX_SECONDS;
 function answering(status: TransactionStatus): TransactionStatusSource & { asked: () => string[] } {
   const asked: string[] = [];
   return {
-    reference: 'https://api.devnet.example.test/rpc',
+    reference: 'https://api.devnet.example.test',
     asked: () => asked,
     async status(signature) {
       asked.push(signature);
@@ -444,7 +444,7 @@ recordExecution('SVM-RPC-001');
     paymentPayload: F.PAYMENT_PAYLOAD,
     settleResponse: F.SETTLEMENT_RESPONSE,
     lifecycle: { states: [], terminalState: 'response_write_attempted' },
-    observationSource: { kind: 'facilitator', reference: 'https://facilitator.example.test/' },
+    observationSource: { kind: 'facilitator', reference: 'https://facilitator.example.test' },
     rpcObservation: observation,
     observedAtUnixSeconds: OBSERVED_AT,
     assetDecimals: F.TOKEN_DECIMALS,
@@ -462,7 +462,7 @@ recordExecution('SVM-RPC-001');
     requirements: F.PAYMENT_REQUIREMENTS,
     paymentPayload: F.PAYMENT_PAYLOAD,
     lifecycle: { states: [], terminalState: 'verification_rejected' },
-    observationSource: { kind: 'facilitator', reference: 'https://facilitator.example.test/' },
+    observationSource: { kind: 'facilitator', reference: 'https://facilitator.example.test' },
     rpcObservation: observation,
     observedAtUnixSeconds: OBSERVED_AT,
     assetDecimals: F.TOKEN_DECIMALS,
@@ -483,11 +483,11 @@ recordExecution('SVM-RPC-001');
 recordExecution('SVM-RPC-002');
 {
   const unreachable: TransactionStatusSource = {
-    reference: 'https://api.devnet.example.test/rpc',
+    reference: 'https://api.devnet.example.test',
     status: () => Promise.reject(new Error('connect ECONNREFUSED 203.0.113.7:443 <server text>')),
   };
   const silent: TransactionStatusSource = {
-    reference: 'https://api.devnet.example.test/rpc',
+    reference: 'https://api.devnet.example.test',
     status: () => Promise.resolve(undefined),
   };
 
@@ -595,7 +595,7 @@ async function verifiedWithObservation(
   status: TransactionStatus | 'unavailable',
 ): Promise<{ readonly report: EvidenceVerificationReport; readonly rendered: string }> {
   const source: TransactionStatusSource = {
-    reference: 'https://api.devnet.example.test/rpc',
+    reference: 'https://api.devnet.example.test',
     status: () => Promise.resolve(status === 'unavailable' ? undefined : status),
   };
   const run = await runOnce();
@@ -1193,14 +1193,32 @@ await incoherentCase({
   expectFailing: RESULT_DIGEST_CHECK,
 });
 
+/**
+ * COHERE-007. Another local profile.
+ *
+ * The chain observation's `profile` member is now held to the committed schema alongside the rest
+ * of its shape, so this case is a schema failure rather than a bare equality, and is asserted the
+ * same way COHERE-009 and COHERE-010 assert their schema failures below.
+ */
 recordExecution('COHERE-007');
-await incoherentCase({
-  label: 'an observation naming another local profile',
-  mutations: {
+{
+  const directory = await incoherentDirectory({
     observation: (d) => ({ ...d, profile: 'org.example/some-other-observation/1' }),
-  },
-  expectFailing: OBSERVATION_PROFILE_CHECK,
-});
+  });
+  const report = await verifyEvidence(directory, fixtureKey.publicKey);
+  const failing = failedChecks(report);
+  check(
+    'an observation naming another local profile still matches its bound digest',
+    report.checks.some((c) => c.name === 'chain observation digest' && c.ok),
+    failing.join(', ') || 'nothing failed',
+  );
+  check(
+    'and exactly its local profile check reports it',
+    failing.length === 1 && failing[0] === OBSERVATION_PROFILE_CHECK,
+    failing.join(', ') || 'nothing failed',
+  );
+  rmSync(directory, { recursive: true, force: true });
+}
 
 /**
  * COHERE-008. Another payment scheme.
@@ -1208,13 +1226,43 @@ await incoherentCase({
  * This example observes `exact` and nothing else, so an observation naming a different scheme is
  * refused rather than read as though its fields meant what they mean under `exact`. That is a bound
  * on what this example claims to have looked at, not a judgement about the other scheme.
+ *
+ * The committed schema also constrains `scheme` to `exact`, so a value the manual scheme check
+ * would reject now fails the schema check as well; both are two honest statements of the same
+ * bound rather than one check masking the other, so both are asserted rather than exactly one.
  */
 recordExecution('COHERE-008');
-await incoherentCase({
-  label: 'an observation naming another scheme',
-  mutations: { observation: (d) => ({ ...d, scheme: 'upto' }) },
-  expectFailing: OBSERVATION_SCHEME_CHECK,
-});
+{
+  const directory = await incoherentDirectory({ observation: (d) => ({ ...d, scheme: 'upto' }) });
+  const report = await verifyEvidence(directory, fixtureKey.publicKey);
+  const failing = failedChecks(report);
+  check(
+    'an observation naming another scheme: the record itself is intact, so this is not tampering',
+    report.checks.some((c) => c.name === 'record signature and schema' && c.ok) &&
+      report.checks.some((c) => c.name === 'chain observation digest' && c.ok),
+    failing.join(', ') || 'nothing failed',
+  );
+  check(
+    'an observation naming another scheme: the directory does not verify',
+    report.ok === false,
+    'it verified',
+  );
+  check(
+    'an observation naming another scheme: exactly the local profile and scheme checks report it',
+    failing.length === 2 &&
+      failing.includes(OBSERVATION_PROFILE_CHECK) &&
+      failing.includes(OBSERVATION_SCHEME_CHECK),
+    failing.join(', ') || 'nothing failed',
+  );
+  check(
+    'an observation naming another scheme: the scheme check names both sides without deciding which is right',
+    /the record carries|one document names|the observation carries|the document names/.test(
+      report.checks.find((c) => c.name === OBSERVATION_SCHEME_CHECK)?.detail ?? '',
+    ),
+    report.checks.find((c) => c.name === OBSERVATION_SCHEME_CHECK)?.detail ?? 'no such check',
+  );
+  rmSync(directory, { recursive: true, force: true });
+}
 
 /**
  * COHERE-009 and COHERE-010. Documents that are bound, intact, and not the shape this example
@@ -1305,6 +1353,190 @@ recordExecution('COHERE-011');
     ),
   );
 }
+
+// ---------------------------------------------------------------------------------------------
+// The Solana chain observation, against its committed schema.
+// ---------------------------------------------------------------------------------------------
+
+console.log('\nThe chain observation, against its committed schema\n');
+
+/**
+ * OBS-SCHEMA-001. The committed evidence, against the schema its chain observation is now held to.
+ *
+ * COHERE-011 already asserts this as part of the full check list; this case names it on its own so
+ * the positive result has its own identifier rather than only appearing inside a larger case.
+ */
+recordExecution('OBS-SCHEMA-001');
+{
+  const report = await verifyEvidence(EXPECTED_EVIDENCE_DIR, fixtureKey.publicKey);
+  check(
+    'the committed chain observation matches the example-local schema',
+    report.checks.some((c) => c.name === OBSERVATION_PROFILE_CHECK && c.ok),
+    report.checks.find((c) => c.name === OBSERVATION_PROFILE_CHECK)?.detail ?? 'the check did not run',
+  );
+}
+
+/**
+ * A chain observation altered into a shape the schema refuses, and re-signed over exactly the
+ * altered bytes the same way the COHERE cases above are built, so the digest recomputes and the
+ * only thing left for the verifier to object to is the document's shape.
+ *
+ * Weaker than `incoherentCase`: several of the malformed values below also disagree with the
+ * record's own claims and trip a second named check, and that is expected rather than suppressed.
+ * What every case here asserts is narrower and still exact: the local profile check is among the
+ * checks that fail, and the directory does not verify.
+ */
+async function schemaViolationCase(input: {
+  readonly label: string;
+  readonly mutate: (document: Record<string, unknown>) => Record<string, unknown>;
+}): Promise<void> {
+  const directory = await incoherentDirectory({ observation: input.mutate });
+  try {
+    const report = await verifyEvidence(directory, fixtureKey.publicKey);
+    const failing = failedChecks(report);
+    check(
+      `${input.label}: the local profile check fails`,
+      failing.includes(OBSERVATION_PROFILE_CHECK),
+      failing.join(', ') || 'nothing failed',
+    );
+    check(`${input.label}: the directory does not verify`, report.ok === false, 'it verified');
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+recordExecution('OBS-SCHEMA-002');
+await schemaViolationCase({
+  label: 'an unknown top-level member',
+  mutate: (d) => ({ ...d, unexpectedMember: 'not part of this profile' }),
+});
+
+recordExecution('OBS-SCHEMA-003');
+await schemaViolationCase({
+  label: 'a missing required member',
+  mutate: (d) => {
+    const { recipient: _recipient, ...rest } = d;
+    return rest;
+  },
+});
+
+recordExecution('OBS-SCHEMA-004');
+await schemaViolationCase({
+  label: 'assetDecimals as the wrong primitive type',
+  mutate: (d) => ({ ...d, assetDecimals: '6' }),
+});
+
+recordExecution('OBS-SCHEMA-005');
+await schemaViolationCase({
+  label: 'a malformed settlement response digest',
+  mutate: (d) => ({ ...d, settlementResponseDigest: 'sha256:not-a-hex-digest' }),
+});
+
+recordExecution('OBS-SCHEMA-006');
+await schemaViolationCase({
+  label: 'an unrecognised settlement outcome',
+  mutate: (d) => ({ ...d, settlementOutcome: 'maybe' }),
+});
+
+recordExecution('OBS-SCHEMA-007');
+await schemaViolationCase({
+  label: 'an unrecognised terminal state',
+  mutate: (d) => ({ ...d, terminalState: 'nope' }),
+});
+
+recordExecution('OBS-SCHEMA-008');
+await schemaViolationCase({
+  label: 'an observation source missing its kind',
+  mutate: (d) => ({
+    ...d,
+    observationSource: { reference: (d.observationSource as { reference: string }).reference },
+  }),
+});
+
+recordExecution('OBS-SCHEMA-009');
+await schemaViolationCase({
+  label: 'an observation source reference carrying a path',
+  mutate: (d) => ({
+    ...d,
+    observationSource: { kind: 'facilitator', reference: 'https://facilitator.example/pay' },
+  }),
+});
+
+recordExecution('OBS-SCHEMA-010');
+await schemaViolationCase({
+  label: 'an observation source reference carrying userinfo',
+  mutate: (d) => ({
+    ...d,
+    observationSource: { kind: 'facilitator', reference: 'https://user:pass@facilitator.example' },
+  }),
+});
+
+recordExecution('OBS-SCHEMA-011');
+await schemaViolationCase({
+  label: 'an rpc observation reporting observed with no slot',
+  mutate: (d) => ({
+    ...d,
+    rpcObservation: {
+      source: { kind: 'rpc', reference: 'https://api.devnet.solana.com' },
+      transactionSignature: d.transactionSignature,
+      status: 'observed',
+      observedAtUnixSeconds: d.observedAtUnixSeconds,
+      statement: 'a statement without a reported slot',
+    },
+  }),
+});
+
+recordExecution('OBS-SCHEMA-012');
+await schemaViolationCase({
+  label: 'an rpc observation with an unrecognised unavailable reason',
+  mutate: (d) => ({
+    ...d,
+    rpcObservation: {
+      source: { kind: 'rpc', reference: 'https://api.devnet.solana.com' },
+      transactionSignature: d.transactionSignature,
+      status: 'unavailable',
+      unavailableReason: 'the endpoint returned an error the code does not declare',
+      observedAtUnixSeconds: d.observedAtUnixSeconds,
+      statement: 'a statement carrying an undeclared reason',
+    },
+  }),
+});
+
+recordExecution('OBS-SCHEMA-013');
+await schemaViolationCase({
+  label: 'a transaction signature carrying a non-base58 character',
+  mutate: (d) => ({ ...d, transactionSignature: `0${'A'.repeat(83)}` }),
+});
+
+recordExecution('OBS-SCHEMA-014');
+await schemaViolationCase({
+  label: 'a fractional observedAtUnixSeconds',
+  mutate: (d) => ({ ...d, observedAtUnixSeconds: 1785000000.5 }),
+});
+
+recordExecution('OBS-SCHEMA-015');
+await schemaViolationCase({
+  label: 'a negative observedAtUnixSeconds',
+  mutate: (d) => ({ ...d, observedAtUnixSeconds: -1 }),
+});
+
+recordExecution('OBS-SCHEMA-016');
+await schemaViolationCase({
+  label: 'assetDecimals outside its declared range',
+  mutate: (d) => ({ ...d, assetDecimals: 256 }),
+});
+
+recordExecution('OBS-SCHEMA-017');
+await schemaViolationCase({
+  label: 'amountBaseUnits carrying a leading zero',
+  mutate: (d) => ({ ...d, amountBaseUnits: '0250000' }),
+});
+
+recordExecution('OBS-SCHEMA-018');
+await schemaViolationCase({
+  label: 'a network that is not the Solana CAIP-2 form',
+  mutate: (d) => ({ ...d, network: 'eip155:1' }),
+});
 
 // ---------------------------------------------------------------------------------------------
 // What a remote party says, against what this flow writes down.
