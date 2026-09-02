@@ -16,8 +16,8 @@ facilitator injected into the run, over synthetic transaction artifacts rather t
 payment. It needs no network and reproduces byte for byte, so the committed evidence in
 `fixtures/expected-evidence/` can be verified from a checkout, from the files and a public key
 alone. The second path runs the same evidence pipeline against a real payment on Solana Devnet; it
-is a documented manual step, not part of continuous integration. It was demonstrated on 2026-08-20
-against a real Solana Devnet transaction; see
+is a documented manual step, not part of continuous integration. It was last demonstrated on
+2026-09-02 against a real Solana Devnet transaction; see
 [Live Devnet Acceptance](docs/LIVE_DEVNET_ACCEPTANCE.md).
 
 Start with the [walkthrough](docs/WALKTHROUGH.md) for the full command path, the lifecycle state
@@ -315,7 +315,7 @@ demonstrates and how far each part has actually been exercised.
 | request binding and origin-result binding | implemented |
 | deterministic validation vectors and rejection corpus | implemented |
 | offline x402 lifecycle reference | implemented, deterministic, no onchain payment |
-| live Solana Devnet USDC payment | demonstrated 2026-08-20; see [Live Devnet Acceptance](docs/LIVE_DEVNET_ACCEPTANCE.md) |
+| live Solana Devnet USDC payment | demonstrated 2026-08-20 and 2026-09-02; see [Live Devnet Acceptance](docs/LIVE_DEVNET_ACCEPTANCE.md) |
 | separate Solana RPC observation | implemented for the live run; optional, and recorded as unavailable when the endpoint cannot answer |
 | PEAC signed record issuance | implemented |
 | offline verification from files and a public key | implemented |
