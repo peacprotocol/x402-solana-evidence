@@ -1,0 +1,316 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://peacprotocol.org/examples/payment-evidence/solana-chain-observation/1",
+  "title": "Payment evidence example Solana chain observation (experimental, non-normative)",
+  "description": "Application-local profile for this example. Does not extend the PEAC wire format, record registry, extension registry or conformance requirements. It is not a PEAC schema and not an x402 schema: it describes one document this repository invents to record what a facilitator and, separately, a Solana node reported about a settlement.",
+  "$comment": "transactionSignature length bound: a base58-encoded 64-byte Solana signature is typically 86-90 characters, the committed synthetic fixture signature is 84 characters, and the live Devnet acceptance signature recorded in docs/LIVE_DEVNET_ACCEPTANCE.md is 88 characters. The bound below (64-100) admits all three without accepting an unrelated short token.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "profile",
+    "network",
+    "scheme",
+    "asset",
+    "amountBaseUnits",
+    "assetDecimals",
+    "recipient",
+    "observationSource",
+    "observedAtUnixSeconds",
+    "terminalState",
+    "settlementOutcome"
+  ],
+  "properties": {
+    "profile": {
+      "const": "org.peacprotocol.examples.payment-evidence/solana-chain-observation/1"
+    },
+    "network": {
+      "type": "string",
+      "$comment": "CAIP-2 Solana form: the namespace 'solana' followed by the first 32 base58 characters of the genesis hash.",
+      "pattern": "^solana:[1-9A-HJ-NP-Za-km-z]{32}$"
+    },
+    "scheme": {
+      "$comment": "This example records the x402 exact scheme only.",
+      "enum": [
+        "exact"
+      ]
+    },
+    "asset": {
+      "$ref": "#/$defs/base58Account"
+    },
+    "amountBaseUnits": {
+      "type": "string",
+      "$comment": "u64 smallest-unit amount as a decimal string, no leading zero, no sign.",
+      "pattern": "^(0|[1-9][0-9]*)$",
+      "maxLength": 20
+    },
+    "assetDecimals": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 255
+    },
+    "recipient": {
+      "$ref": "#/$defs/base58Account"
+    },
+    "payer": {
+      "$ref": "#/$defs/base58Account"
+    },
+    "transactionSignature": {
+      "$ref": "#/$defs/base58Signature",
+      "$comment": "Present when settlement succeeded or was reported pending; never beside a refusal. That relationship is checked by the verifier, not here."
+    },
+    "recentBlockhash": {
+      "$ref": "#/$defs/base58Account"
+    },
+    "observationSource": {
+      "$ref": "#/$defs/observationSource"
+    },
+    "rpcObservation": {
+      "$ref": "#/$defs/rpcObservation"
+    },
+    "settlementResponseDigest": {
+      "$ref": "#/$defs/sha256Digest"
+    },
+    "serviceResultDigest": {
+      "$ref": "#/$defs/sha256Digest"
+    },
+    "observedAtUnixSeconds": {
+      "$ref": "#/$defs/unixSeconds"
+    },
+    "terminalState": {
+      "enum": [
+        "response_write_attempted",
+        "payment_rejected_pre_verification",
+        "verification_rejected",
+        "handler_error_status",
+        "settlement_failed",
+        "settlement_pending",
+        "payment_required_only"
+      ]
+    },
+    "settlementOutcome": {
+      "enum": [
+        "succeeded",
+        "pending",
+        "refused",
+        "not_reached"
+      ]
+    },
+    "settlementFailureReason": {
+      "enum": [
+        "verification_rejected",
+        "verification_exception",
+        "settlement_rejected",
+        "settlement_exception",
+        "handler_failed",
+        "duplicate_settlement",
+        "network_mismatch",
+        "scheme_mismatch",
+        "asset_mismatch",
+        "amount_mismatch",
+        "recipient_mismatch",
+        "missing_transaction",
+        "extension_echo_mismatch"
+      ]
+    }
+  },
+  "$defs": {
+    "base58Account": {
+      "type": "string",
+      "$comment": "A Solana public key, base58, admitting the committed fixture's synthetic 44-character values and real 32-44 character addresses.",
+      "pattern": "^[1-9A-HJ-NP-Za-km-z]{32,44}$"
+    },
+    "base58Signature": {
+      "type": "string",
+      "pattern": "^[1-9A-HJ-NP-Za-km-z]{64,100}$"
+    },
+    "sha256Digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "unixSeconds": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 253402300799
+    },
+    "endpointReference": {
+      "type": "string",
+      "$comment": "Either the origin of an http(s) endpoint (scheme, host, optional port; never userinfo, path, query or fragment) or a caller-stated safe label, matching the SAFE_LABEL pattern in observe-transaction.ts.",
+      "anyOf": [
+        {
+          "pattern": "^https?://(\\[[0-9A-Fa-f:]+\\]|[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*)(:[0-9]{1,5})?$"
+        },
+        {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9 ,.:_-]{0,79}$"
+        }
+      ]
+    },
+    "observationSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "reference"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "facilitator",
+            "rpc",
+            "in_process_fixture"
+          ]
+        },
+        "reference": {
+          "$ref": "#/$defs/endpointReference"
+        }
+      }
+    },
+    "rpcSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "reference"
+      ],
+      "properties": {
+        "kind": {
+          "const": "rpc"
+        },
+        "reference": {
+          "$ref": "#/$defs/endpointReference"
+        }
+      }
+    },
+    "rpcObservation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "transactionSignature",
+        "status",
+        "observedAtUnixSeconds",
+        "statement"
+      ],
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/rpcSource"
+        },
+        "transactionSignature": {
+          "$ref": "#/$defs/base58Signature"
+        },
+        "status": {
+          "enum": [
+            "observed",
+            "unavailable"
+          ]
+        },
+        "observedSlot": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "commitment": {
+          "enum": [
+            "processed",
+            "confirmed",
+            "finalized"
+          ]
+        },
+        "reportedTransactionError": {
+          "const": true
+        },
+        "unavailableReason": {
+          "enum": [
+            "the endpoint could not be reached or did not answer in time",
+            "the endpoint reported no status for this transaction"
+          ]
+        },
+        "observedAtUnixSeconds": {
+          "$ref": "#/$defs/unixSeconds"
+        },
+        "statement": {
+          "type": "string",
+          "maxLength": 512,
+          "pattern": "^[ -~]*$"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "status"
+            ],
+            "properties": {
+              "status": {
+                "const": "observed"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "observedSlot"
+            ],
+            "properties": {
+              "observedSlot": {}
+            },
+            "not": {
+              "required": [
+                "unavailableReason"
+              ],
+              "properties": {
+                "unavailableReason": {}
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "status"
+            ],
+            "properties": {
+              "status": {
+                "const": "unavailable"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "unavailableReason"
+            ],
+            "properties": {
+              "unavailableReason": {}
+            },
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "observedSlot"
+                  ],
+                  "properties": {
+                    "observedSlot": {}
+                  }
+                },
+                {
+                  "required": [
+                    "commitment"
+                  ],
+                  "properties": {
+                    "commitment": {}
+                  }
+                },
+                {
+                  "required": [
+                    "reportedTransactionError"
+                  ],
+                  "properties": {
+                    "reportedTransactionError": {}
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}

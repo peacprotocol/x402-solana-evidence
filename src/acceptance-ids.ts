@@ -68,6 +68,9 @@ export const ACCEPTANCE_CASES = {
   'SVM-LIFE-003': { description: 'handler returned an error status: cancellation, no settlement', scope: 'local' },
   'SVM-LIFE-004': { description: 'resource executed and settlement failed: recorded as never written', scope: 'local' },
   'SVM-LIFE-005': { description: 'a payment refused before verification produces verifiable evidence of the refusal', scope: 'local' },
+  'SVM-LIFE-006': { description: 'a settlement reported pending after the single upstream retry is recorded as pending with its transaction, never as a refusal', scope: 'local' },
+  'SVM-LIFE-007': { description: 'a settlement reported pending once and confirmed on the upstream retry is recorded as settled', scope: 'local' },
+  'SVM-LIFE-008': { description: 'a settlement refusal delivered through the failure hook keeps the facilitator\'s reason', scope: 'local' },
   /**
    * NARROWED, and the description says so rather than the claim being quietly widened later.
    * Whether a fee payer is isolated from the transfer it pays for is decided by the upstream SVM
@@ -208,6 +211,33 @@ export const ACCEPTANCE_CASES = {
   'COHERE-011': { description: 'the committed evidence satisfies every profile and agreement check', scope: 'local' },
 
   /**
+   * The Solana chain observation, against its committed schema.
+   *
+   * Before this arc, the check named `chain observation local profile` compared the `profile`
+   * member by bare equality and validated nothing else about the document's shape. These cases
+   * hold the whole document to `schemas/solana-chain-observation.v1.schema.json`, the way the
+   * request binding and the origin result binding are already held to theirs.
+   */
+  'OBS-SCHEMA-001': { description: 'the committed chain observation matches the example-local schema', scope: 'local' },
+  'OBS-SCHEMA-002': { description: 'an unknown top-level member is refused', scope: 'local' },
+  'OBS-SCHEMA-003': { description: 'a missing required member is refused', scope: 'local' },
+  'OBS-SCHEMA-004': { description: 'a member of the wrong primitive type is refused', scope: 'local' },
+  'OBS-SCHEMA-005': { description: 'a malformed digest string is refused', scope: 'local' },
+  'OBS-SCHEMA-006': { description: 'an unrecognised settlement outcome is refused', scope: 'local' },
+  'OBS-SCHEMA-007': { description: 'an unrecognised terminal state is refused', scope: 'local' },
+  'OBS-SCHEMA-008': { description: 'an observation source missing its kind is refused', scope: 'local' },
+  'OBS-SCHEMA-009': { description: 'an observation source reference carrying a path is refused', scope: 'local' },
+  'OBS-SCHEMA-010': { description: 'an observation source reference carrying userinfo is refused', scope: 'local' },
+  'OBS-SCHEMA-011': { description: 'an rpc observation reporting observed with no slot is refused', scope: 'local' },
+  'OBS-SCHEMA-012': { description: 'an rpc observation with an unrecognised unavailable reason is refused', scope: 'local' },
+  'OBS-SCHEMA-013': { description: 'a transaction signature carrying a non-base58 character is refused', scope: 'local' },
+  'OBS-SCHEMA-014': { description: 'a fractional observedAtUnixSeconds is refused', scope: 'local' },
+  'OBS-SCHEMA-015': { description: 'a negative observedAtUnixSeconds is refused', scope: 'local' },
+  'OBS-SCHEMA-016': { description: 'assetDecimals outside its declared range is refused', scope: 'local' },
+  'OBS-SCHEMA-017': { description: 'amountBaseUnits carrying a leading zero is refused', scope: 'local' },
+  'OBS-SCHEMA-018': { description: 'a network that is not the Solana CAIP-2 form is refused', scope: 'local' },
+
+  /**
    * The material a reviewer needs, produced before anything is spent.
    *
    * A live run that settles a payment and then cannot write the public half of its signing key has
@@ -225,6 +255,17 @@ export const ACCEPTANCE_CASES = {
    * separate matter: those are observed wire artifacts and carry exactly what was sent.
    */
   'SAN-ERR-001': { description: 'remote failure text never reaches a persisted reason or a durable diagnostic', scope: 'local' },
+
+  /**
+   * Evidence of a settlement that ended pending.
+   *
+   * A pending settlement is the one outcome that carries a transaction reference without claiming
+   * a payment. These cases hold the verifier to that: the reference must be there, the outcome must
+   * say pending, and the terminal state written beside it must agree.
+   */
+  'EVID-PEND-001': { description: 'evidence of a pending settlement verifies, with the transaction recorded and the outcome pending', scope: 'local' },
+  'EVID-PEND-002': { description: 'a pending observation with its transaction reference removed fails the settlement facts check', scope: 'local' },
+  'EVID-PEND-003': { description: 'a pending observation relabelled as succeeded fails the outcome-versus-terminal-state check', scope: 'local' },
 
   'EVID-TX-001': { description: 'an interrupted emission leaves no final evidence directory', scope: 'local' },
   'EVID-TX-002': { description: 'an existing evidence directory is never overwritten or written into', scope: 'local' },

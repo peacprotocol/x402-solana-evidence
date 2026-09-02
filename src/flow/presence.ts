@@ -105,6 +105,23 @@ const CONTRACTS: Readonly<Record<TerminalState, PresenceContract>> = {
     'origin-result-body.bin': 'required',
   },
 
+  /**
+   * F5. The resource was produced and the facilitator reported settlement as pending, so the
+   * middleware discarded the buffered result and wrote a payment-required response instead.
+   *
+   * The settlement field value is required here, unlike the refusal above: it is the artifact that
+   * carries the pending report and the transaction reference, and a run that recorded a pending
+   * settlement without it would be describing something nobody can reconcile. MEASURED: the
+   * middleware writes the settlement field on this path.
+   */
+  settlement_pending: {
+    ...ALWAYS,
+    'artifacts/payment-signature.txt': 'required',
+    'artifacts/payment-response.txt': 'required',
+    'origin-result-binding.json': 'required',
+    'origin-result-body.bin': 'required',
+  },
+
   /** No payment was ever presented, so the challenge is the whole run. */
   payment_required_only: {
     ...ALWAYS,

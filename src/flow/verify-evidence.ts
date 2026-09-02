@@ -57,7 +57,6 @@ import {
 import { resolveIssuerKey } from './issuer-key.ts';
 import { TERMINAL_STATES, type TerminalState } from './lifecycle.ts';
 import { validateLocalProfile, type LocalProfileDocument } from './profile-schema.ts';
-import { PROFILE_CHAIN_OBSERVATION } from './observe-settlement.ts';
 import {
   InvalidPublicKeyFileError,
   PUBLIC_KEY_ALGORITHM,
@@ -423,9 +422,9 @@ export async function verifyEvidence(
    * missing component, an unknown member or a digest string of the wrong shape is reported rather
    * than passed through intact.
    *
-   * EXAMPLE-LOCAL, and the name says so. These schemas describe two documents this repository
-   * invents. Satisfying one is not PEAC conformance and not x402 conformance, and neither profile
-   * is registered anywhere.
+   * EXAMPLE-LOCAL, and the name says so. These schemas describe three documents this repository
+   * invents. Satisfying one is not PEAC conformance and not x402 conformance, and none of the
+   * profiles is registered anywhere.
    *
    * A document that was refused or is absent produces no check here: the digest check above already
    * carries that failure, and restating it as a second one would tell a reader nothing new.
@@ -461,6 +460,11 @@ export async function verifyEvidence(
     'chain observation digest',
     'chain-observation.json',
     evidence['chain_observation_digest'],
+  );
+  checkLocalProfile(
+    'chain observation local profile',
+    'chain-observation.json',
+    'solana-chain-observation',
   );
 
   /** Recompute an observed field value digest from the bytes recorded beside the record. */
@@ -568,18 +572,10 @@ export async function verifyEvidence(
     };
     const observationDocument = observationRead.value as Record<string, unknown>;
 
-    // Which document this is, and which payment scheme it describes. Both are stated by the
-    // producer, so both are checked rather than assumed: an observation carrying another profile,
-    // or another scheme, is not the document the rest of these checks are written against.
-    checks.push(
-      observationDocument['profile'] === PROFILE_CHAIN_OBSERVATION
-        ? pass('chain observation local profile', PROFILE_CHAIN_OBSERVATION)
-        : fail(
-            'chain observation local profile',
-            `expected ${PROFILE_CHAIN_OBSERVATION}, the document names ` +
-              `${describeBound(observationDocument['profile'])}`,
-          ),
-    );
+    // Which payment scheme this observation describes. The profile itself is already held to the
+    // committed schema above, which checks the `profile` member by `const` along with everything
+    // else about the document's shape; restating a bare equality on it here would double-count the
+    // same fact as a second named check.
     checks.push(
       observationDocument['scheme'] === OBSERVED_SCHEME
         ? pass('chain observation scheme', OBSERVED_SCHEME)
@@ -590,19 +586,55 @@ export async function verifyEvidence(
           ),
     );
 
-    const settled = observation.settlementOutcome === 'succeeded';
+    // A succeeded or pending settlement names its transaction; a refused or unreached one names
+    // none. Pending is the one outcome that carries a reference without claiming a payment: it is
+    // the handle a reader reconciles against, and the outcome beside it says it is unresolved.
+    const outcome = observation.settlementOutcome;
+    const expectsTransaction = outcome === 'succeeded' || outcome === 'pending';
     const hasTransaction = typeof observation.transactionSignature === 'string';
     checks.push(
-      settled === hasTransaction
+      expectsTransaction === hasTransaction
         ? pass(
             'settlement facts match the outcome',
-            settled ? 'settled, transaction recorded' : 'not settled, no transaction recorded',
+            outcome === 'succeeded'
+              ? 'settled, transaction recorded'
+              : outcome === 'pending'
+                ? 'pending, transaction recorded and unresolved'
+                : 'not settled, no transaction recorded',
           )
         : fail(
             'settlement facts match the outcome',
-            settled
-              ? 'settlement succeeded but no transaction reference is recorded'
+            expectsTransaction
+              ? `settlement ${outcome} but no transaction reference is recorded`
               : 'a transaction reference is recorded for a settlement that did not succeed',
+          ),
+    );
+
+    /**
+     * The outcome, against the terminal state written beside it.
+     *
+     * The two are stated by the same producer and derived from the same run, so they must agree:
+     * a settlement recorded as succeeded belongs to a run that wrote its result, a pending one to a
+     * run that ended pending, a refused one to a run that ended in settlement failure, and an
+     * unreached one to any run that never settled. An observation whose outcome says one thing
+     * while its terminal state says another has relabelled a settlement, which is the exact
+     * misstatement a reader of payment evidence cannot afford to inherit.
+     */
+    const terminal = observationDocument['terminalState'];
+    const outcomeFor = (state: unknown): string =>
+      state === 'response_write_attempted'
+        ? 'succeeded'
+        : state === 'settlement_pending'
+          ? 'pending'
+          : state === 'settlement_failed'
+            ? 'refused'
+            : 'not_reached';
+    checks.push(
+      typeof outcome === 'string' && typeof terminal === 'string' && outcomeFor(terminal) === outcome
+        ? pass('settlement outcome consistent with the terminal state', `${outcome} with ${terminal}`)
+        : fail(
+            'settlement outcome consistent with the terminal state',
+            `outcome ${describeBound(outcome)} beside terminal state ${describeBound(terminal)}`,
           ),
     );
 
@@ -644,7 +676,7 @@ export async function verifyEvidence(
        * signature failure: the record says exactly what each observer said, and it says it
        * intact. So the disagreement is surfaced where a reader will see it, and left there.
        */
-      if (sameTransaction && settled && nodeReportedError) {
+      if (sameTransaction && outcome === 'succeeded' && nodeReportedError) {
         warnings.push({
           name: 'observer disagreement',
           detail:

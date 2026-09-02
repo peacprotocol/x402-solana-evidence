@@ -16,12 +16,40 @@ facilitator injected into the run, over synthetic transaction artifacts rather t
 payment. It needs no network and reproduces byte for byte, so the committed evidence in
 `fixtures/expected-evidence/` can be verified from a checkout, from the files and a public key
 alone. The second path runs the same evidence pipeline against a real payment on Solana Devnet; it
-is a documented manual step, not part of continuous integration. It was demonstrated on 2026-08-20
-against a real Solana Devnet transaction; see
+is a documented manual step, not part of continuous integration. It was last demonstrated on
+2026-09-02 against a real Solana Devnet transaction; see
 [Live Devnet Acceptance](docs/LIVE_DEVNET_ACCEPTANCE.md).
 
 Start with the [walkthrough](docs/WALKTHROUGH.md) for the full command path, the lifecycle state
 machine and the devnet procedure.
+
+## Reviewer path
+
+What it is: a portable, offline-verifiable evidence bundle for one x402 v2 `exact` payment
+interaction on Solana, binding the request that was made, the native x402 artifacts, the settlement
+as two separately attributed observers reported it, the lifecycle outcome, and the exact bytes the
+origin produced.
+
+The problem it addresses: when a paid request is disputed, reconciled or investigated later, the
+parties usually hold unrelated private logs. This evidence can be handed to another organisation and
+checked there, from the files and a public key alone, without access to the service's systems.
+
+What is Solana-specific: the x402 SVM `exact` scheme, CAIP-2 Solana network identifiers, SPL token
+payment requirements, the facilitator as fee payer, blockhash-bound transactions, and a separately
+attributed Solana RPC observation, all through the upstream `@x402/svm` stack.
+
+```bash
+corepack pnpm@8.15.0 install --frozen-lockfile
+corepack pnpm@8.15.0 demo:fixture    # offline end-to-end run; writes and verifies the evidence
+corepack pnpm@8.15.0 verify          # verify it again from the files and a public key
+corepack pnpm@8.15.0 tamper-demo     # edit one bound field in a copy; verification names it
+```
+
+Live proof: [Live Devnet Acceptance](docs/LIVE_DEVNET_ACCEPTANCE.md), a real payment on Solana
+Devnet with the transaction reference, both observations, and the tamper failure.
+
+Boundary: x402 stays the payment protocol and its native artifacts stay authoritative; there is no
+new payment rail, no Solana program, no token, and no change to the x402 or PEAC wire formats.
 
 ## What this demonstrates
 
@@ -287,18 +315,19 @@ demonstrates and how far each part has actually been exercised.
 | request binding and origin-result binding | implemented |
 | deterministic validation vectors and rejection corpus | implemented |
 | offline x402 lifecycle reference | implemented, deterministic, no onchain payment |
-| live Solana Devnet USDC payment | demonstrated 2026-08-20; see [Live Devnet Acceptance](docs/LIVE_DEVNET_ACCEPTANCE.md) |
+| live Solana Devnet USDC payment | demonstrated 2026-08-20 and 2026-09-02; see [Live Devnet Acceptance](docs/LIVE_DEVNET_ACCEPTANCE.md) |
 | separate Solana RPC observation | implemented for the live run; optional, and recorded as unavailable when the endpoint cannot answer |
 | PEAC signed record issuance | implemented |
 | offline verification from files and a public key | implemented |
 | tamper detection | implemented |
 | settlement observation and chain-observation documents | implemented |
-| scheme `upto` | out of scope |
-| batch settlement | out of scope |
-| streaming responses | out of scope |
-| mainnet | out of scope |
-| MCP carriers | out of scope |
-| EVM networks | out of scope |
+| settlement reported pending by the facilitator | recorded as `pending` with the transaction reference, never as a refusal; see the walkthrough's lifecycle table |
+| scheme `upto` | exists upstream; outside this reference's conformance scope |
+| batch settlement | exists upstream; outside this reference's conformance scope |
+| streaming responses | outside this reference's scope |
+| mainnet | outside this reference's scope; Devnet only |
+| MCP carriers | outside this reference's scope |
+| EVM networks | outside this reference's scope |
 
 ## Quickstart
 
@@ -355,7 +384,8 @@ pnpm gen:golden                  # regenerate the vectors, then review the diff
 
 Deterministic validation vectors live in `fixtures/golden-v1.json` with hard-coded expected bytes
 and digests, and are cross-checked against a second, independently written RFC 8785 implementation.
-Both binding documents validate against closed JSON Schema 2020-12 files in `schemas/`.
+The request binding, the origin result binding and the chain observation each validate against a
+closed JSON Schema 2020-12 file in `schemas/`.
 
 Acceptance cases carry stable identifiers declared in `src/acceptance-ids.ts`. The suites record
 each one as it executes and `pnpm test:acceptance` fails if a declared case did not run, so

@@ -560,6 +560,141 @@ recordExecution('SVM-REPLAY-002');
 }
 
 // ---------------------------------------------------------------------------------------------
+// Lifecycle: a settlement the facilitator reports as pending.
+// ---------------------------------------------------------------------------------------------
+
+console.log('\n  -- pending settlement --');
+
+/** The settlement field value the origin wrote, decoded the way a client would decode it. */
+const settlementFieldOf = (observation: RequestObservation): Record<string, unknown> | undefined => {
+  const value = observation.observedHeaders['payment-response'];
+  return value === undefined
+    ? undefined
+    : (JSON.parse(Buffer.from(value, 'base64').toString('utf8')) as Record<string, unknown>);
+};
+
+/**
+ * SVM-LIFE-006. A pending report that survives the resource server's retry.
+ *
+ * MEASURED against @x402/core 2.24.0: the resource server asks the facilitator to settle, receives
+ * a pending report naming a transaction, asks once more, receives the same report, and hands it to
+ * the settlement-failure hook. The origin's result was produced and never written; the client is
+ * answered with a payment-required response whose settlement field carries the pending report and
+ * the transaction. None of that is a refusal, and the evidence must not say it was.
+ */
+recordExecution('SVM-LIFE-006');
+{
+  const origin = await startOrigin({ pendingSettlements: 2 });
+  try {
+    const http = upstreamClient();
+    const { paymentRequired } = await challenge(origin, http);
+    const outcome = await present(origin, http, await http.createPaymentPayload(paymentRequired));
+    const lifecycle = outcome.observation.lifecycle;
+    check(
+      'a pending settlement is recorded as pending, with its transaction, not as a refusal',
+      lifecycle.terminalState === 'settlement_pending' &&
+        lifecycle.transaction === F.TX_SIGNATURE &&
+        lifecycle.failureReason === undefined,
+      `${lifecycle.terminalState}, transaction ${String(lifecycle.transaction)}, ` +
+        `reason ${String(lifecycle.failureReason)}`,
+    );
+    check(
+      'the resource server retried settlement exactly once before reporting it',
+      origin.calls.settle === 2,
+      `settle calls ${origin.calls.settle}`,
+    );
+    check(
+      'the result was produced and never written; the client was answered with a challenge',
+      outcome.observation.originResult !== undefined && outcome.status === 402,
+      `status ${outcome.status}`,
+    );
+    const field = settlementFieldOf(outcome.observation);
+    check(
+      'the settlement field the origin wrote carries the pending report and the transaction',
+      field !== undefined &&
+        field['success'] === false &&
+        field['errorReason'] === 'settlement_pending' &&
+        field['transaction'] === F.TX_SIGNATURE,
+      JSON.stringify(field),
+    );
+  } finally {
+    await origin.close();
+  }
+}
+
+/**
+ * SVM-LIFE-007. A pending report answered by the retry.
+ *
+ * The retry is upstream behaviour, observable from here only as a second settle call. What the
+ * origin sees is a settlement that succeeded, and that is what it records; nothing marks the run
+ * as having been pending, because nothing the hooks deliver says so.
+ */
+recordExecution('SVM-LIFE-007');
+{
+  const origin = await startOrigin({ pendingSettlements: 1 });
+  try {
+    const http = upstreamClient();
+    const { paymentRequired } = await challenge(origin, http);
+    const outcome = await present(origin, http, await http.createPaymentPayload(paymentRequired));
+    check(
+      'a settlement confirmed on the retry is recorded as settled and written',
+      outcome.status === 200 &&
+        outcome.observation.lifecycle.terminalState === 'response_write_attempted' &&
+        outcome.observation.lifecycle.transaction === F.TX_SIGNATURE,
+      `status ${outcome.status}, ${outcome.observation.lifecycle.terminalState}`,
+    );
+    check(
+      'the facilitator was asked twice',
+      origin.calls.settle === 2,
+      `settle calls ${origin.calls.settle}`,
+    );
+  } finally {
+    await origin.close();
+  }
+}
+
+/**
+ * SVM-LIFE-008. A refusal, delivered through the failure hook.
+ *
+ * MEASURED against @x402/core 2.24.0: an unsuccessful settlement result no longer reaches the
+ * after-settle hook; it arrives at the failure hook as a `SettleError`. The facilitator's reason
+ * has to survive that route, or every refusal would be recorded as an exception.
+ */
+recordExecution('SVM-LIFE-008');
+{
+  const origin = await startOrigin({ rejectSettlement: 'recipient_mismatch' });
+  try {
+    const http = upstreamClient();
+    const { paymentRequired } = await challenge(origin, http);
+    const outcome = await present(origin, http, await http.createPaymentPayload(paymentRequired));
+    const lifecycle = outcome.observation.lifecycle;
+    check(
+      'a refusal keeps the supported upstream reason it was refused with',
+      lifecycle.terminalState === 'settlement_failed' &&
+        lifecycle.failureReason === 'recipient_mismatch' &&
+        lifecycle.transaction === undefined,
+      `${lifecycle.terminalState}, ${String(lifecycle.failureReason)}`,
+    );
+  } finally {
+    await origin.close();
+  }
+  const unsupported = await startOrigin({ rejectSettlement: 'a reason this flow does not declare' });
+  try {
+    const http = upstreamClient();
+    const { paymentRequired } = await challenge(unsupported, http);
+    const outcome = await present(unsupported, http, await http.createPaymentPayload(paymentRequired));
+    check(
+      'a refusal with an undeclared reason is recorded under the generic refusal term',
+      outcome.observation.lifecycle.terminalState === 'settlement_failed' &&
+        outcome.observation.lifecycle.failureReason === 'settlement_rejected',
+      String(outcome.observation.lifecycle.failureReason),
+    );
+  } finally {
+    await unsupported.close();
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
 // Binding: a valid payment presented for something else.
 // ---------------------------------------------------------------------------------------------
 
