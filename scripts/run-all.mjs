@@ -2,16 +2,12 @@
 /**
  * The whole test suite, run without a package manager on `PATH`.
  *
- * WHY THIS EXISTS. The `test` script used to chain `pnpm test:imports && pnpm test:golden && ...`,
- * which means the script only runs if a `pnpm` executable is already resolvable. Someone who has
- * no global install and follows the documented `corepack pnpm@8.15.0 test` gets
- * `sh: pnpm: command not found`: corepack runs the outer command, but the shell it spawns for the
- * script has no shim for the nested ones. A reader evaluating this example should not have to
- * debug the runner before seeing a single check.
- *
- * So each step is spawned directly as `node <local entry point>`, using the same Node that started
- * this process and the binaries the install already placed in `node_modules`. Nothing is resolved
- * from `PATH`, and no step invokes a package manager.
+ * WHY LOCAL ENTRY POINTS. A script that chains `pnpm <step> && pnpm <step>` runs only where a
+ * `pnpm` executable is already resolvable, and the documented `corepack pnpm@8.15.0 test`
+ * invocation does not put one on the nested shell's `PATH`. So each step is spawned directly as
+ * `node <local entry point>`, using the same Node that started this process and the binaries the
+ * install already placed in `node_modules`. Nothing is resolved from `PATH`, and no step invokes a
+ * package manager, so the pinned Corepack workflow reproduces without a global install.
  *
  * ORDER AND FAIL-FAST. Steps run sequentially and the first failure stops the run, because a later
  * step reading a directory an earlier one was supposed to write produces a confusing second

@@ -26,9 +26,9 @@ machine and the devnet procedure.
 ## Reviewer path
 
 What it is: a portable, offline-verifiable evidence bundle for one x402 v2 `exact` payment
-interaction on Solana, binding the request that was made, the native x402 artifacts, the settlement
-as two separately attributed observers reported it, the lifecycle outcome, and the exact bytes the
-origin produced.
+interaction on Solana, binding the request that was made, the native x402 artifacts, the
+facilitator's settlement report, a separately attributed Solana RPC observation, the lifecycle
+outcome, and the exact bytes the origin produced.
 
 The problem it addresses: when a paid request is disputed, reconciled or investigated later, the
 parties usually hold unrelated private logs. This evidence can be handed to another organisation and
@@ -45,8 +45,8 @@ corepack pnpm@8.15.0 verify          # verify it again from the files and a publ
 corepack pnpm@8.15.0 tamper-demo     # edit one bound field in a copy; verification names it
 ```
 
-Live proof: [Live Devnet Acceptance](docs/LIVE_DEVNET_ACCEPTANCE.md), a real payment on Solana
-Devnet with the transaction reference, both observations, and the tamper failure.
+Live acceptance evidence: [Live Devnet Acceptance](docs/LIVE_DEVNET_ACCEPTANCE.md), a real payment
+on Solana Devnet with the transaction reference, both observations, and the tamper failure.
 
 Boundary: x402 stays the payment protocol and its native artifacts stay authoritative; there is no
 new payment rail, no Solana program, no token, and no change to the x402 or PEAC wire formats.
@@ -393,9 +393,10 @@ coverage cannot regress while the counts keep looking healthy. Four cases are sc
 integration, because a single local process cannot reproduce them: two repeated-run byte
 comparisons and two runs with networking disabled. One case is scoped to live acceptance; the
 automated matrix reports it as pending because the local suite never executes a real Solana
-Devnet transaction itself, by design. It has been performed manually, once, and that result is
-recorded separately in [Live Devnet Acceptance](docs/LIVE_DEVNET_ACCEPTANCE.md), never inferred
-from the automated report.
+Devnet transaction itself, by design. It is exercised only through documented live-acceptance
+runs; those results are recorded separately in
+[Live Devnet Acceptance](docs/LIVE_DEVNET_ACCEPTANCE.md) and are never inferred from the automated
+report.
 
 One case is deliberately narrower than its name suggests, and the registry says so where it is
 declared: whether an SVM fee payer is isolated from the transfer it pays for is decided by the
@@ -411,9 +412,8 @@ is fabricated placeholder text.
 Payment signatures, payer identifiers, receipts and transaction references can be sensitive. Public
 evidence is digest-only by default; raw artifacts stay private outside fixture mode. No private key
 or payment authorization belongs in this repository, its logs, or a recorded demonstration. A
-deliberate exception — a completed, disposable, test-network evidence set reviewed for privacy
-before release — is described in [SECURITY.md](SECURITY.md) and was used for the `v0.1.0` live
-Devnet evidence archive.
+only permitted exception, a completed, disposable, test-network evidence set reviewed for privacy
+and attached to a release, is described in [SECURITY.md](SECURITY.md).
 
 ## Licence
 

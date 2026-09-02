@@ -265,7 +265,7 @@ for (const sub of ALL_EXPORT_PATHS) {
 check('upstream still ships no runtime settle-response validator', settleValidators.length === 0,
   settleValidators.join(', '));
 
-// 5. report what the installed packages actually export, so a future rename is visible in the diff
+// 5. report what the installed packages actually export, so upstream export-surface changes are visible
 console.log('\n  installed export surface:');
 for (const sub of REQUIRED_SUBPATHS) {
   try {

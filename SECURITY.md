@@ -8,10 +8,10 @@ public issues for suspected vulnerabilities.
 ## Key and payment material
 
 Private keys, seed phrases and funded-wallet material are never published, in this repository or
-anywhere else. Payment authorizations are never committed either; the single deliberate exception is
-a completed test-network artifact released under
-[Publishing live evidence](#publishing-live-evidence) below, which is attached to a release and
-never enters ordinary Git history.
+anywhere else. Payment authorizations are never committed to ordinary Git history. The only
+permitted publication class is a completed, reviewed test-network acceptance artifact released
+under [Publishing live evidence](#publishing-live-evidence) below, attached to a release rather than
+committed to the repository.
 
 - **No private keys, seed phrases or signed payment authorizations** in the repository, in its
   history, in test fixtures, in logs, or in a recorded demonstration. Every account identifier in
