@@ -83,8 +83,10 @@ and all 25 passed:
 
 Correction, 2026-09-02: at `v0.1.0` the check named `chain observation local profile` compared the
 document's `profile` identifier only. Validation of the whole chain observation against a committed
-schema, `schemas/solana-chain-observation.v1.schema.json`, was added after this run; the check name
-and the total are unchanged, and the run above was not repeated to produce this note.
+schema, `schemas/solana-chain-observation.v1.schema.json`, was added after this run under the same
+check name, and a further check, `settlement outcome consistent with the terminal state`, was added with
+the `settlement_pending` lifecycle state. The run above was not repeated to produce this note; a run
+against the current code reports 26 checks.
 
 ## Tamper detection
 

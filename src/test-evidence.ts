@@ -1016,12 +1016,15 @@ console.log('\nEvidence whose two documents describe different things\n');
  * @param mutations - How to alter each document. An omitted one is written unchanged.
  * @returns The directory, written and ready to verify.
  */
-async function incoherentDirectory(mutations: {
-  readonly observation?: (document: Record<string, unknown>) => Record<string, unknown>;
-  readonly requestBinding?: (document: Record<string, unknown>) => Record<string, unknown>;
-  readonly resultBinding?: (document: Record<string, unknown>) => Record<string, unknown>;
-}): Promise<string> {
-  const layout = await buildEvidence(await runOnce());
+async function incoherentDirectory(
+  mutations: {
+    readonly observation?: (document: Record<string, unknown>) => Record<string, unknown>;
+    readonly requestBinding?: (document: Record<string, unknown>) => Record<string, unknown>;
+    readonly resultBinding?: (document: Record<string, unknown>) => Record<string, unknown>;
+  },
+  run: Parameters<typeof runOnce>[0] = {},
+): Promise<string> {
+  const layout = await buildEvidence(await runOnce(run));
   const encode = (value: unknown): Uint8Array =>
     new TextEncoder().encode(`${JSON.stringify(value, null, 2)}\n`);
   const decode = (artifact: EvidenceArtifact): Record<string, unknown> =>
@@ -1137,6 +1140,7 @@ const RESULT_PROFILE_CHECK = 'origin result binding local profile';
 
 /** A digest of the right shape that no document in this directory produced. */
 const OTHER_DIGEST = `sha256:${'a'.repeat(64)}`;
+const OUTCOME_STATE_CHECK = 'settlement outcome consistent with the terminal state';
 
 recordExecution('COHERE-001');
 await incoherentCase({
@@ -1146,11 +1150,26 @@ await incoherentCase({
 });
 
 recordExecution('COHERE-002');
-await incoherentCase({
-  label: 'an observation naming another terminal state',
-  mutations: { observation: (d) => ({ ...d, terminalState: 'settlement_failed' }) },
-  expectFailing: TERMINAL_CHECK,
-});
+{
+  // Another terminal state beside an unchanged outcome trips two checks, and both are the point:
+  // the record and the observation no longer name the same state, and the outcome the observation
+  // still carries no longer fits the state written beside it.
+  const directory = await incoherentDirectory({ observation: (d) => ({ ...d, terminalState: 'settlement_failed' }) });
+  const report = await verifyEvidence(directory, fixtureKey.publicKey);
+  const failing = failedChecks(report);
+  check(
+    'an observation naming another terminal state: the record itself is intact, so this is not tampering',
+    report.checks.some((c) => c.name === 'record signature and schema' && c.ok) &&
+      report.checks.some((c) => c.name === 'chain observation digest' && c.ok),
+    failing.join(', ') || 'nothing failed',
+  );
+  check(
+    'an observation naming another terminal state: exactly the state and outcome checks report it',
+    failing.length === 2 && failing.includes(TERMINAL_CHECK) && failing.includes(OUTCOME_STATE_CHECK),
+    failing.join(', ') || 'nothing failed',
+  );
+  rmSync(directory, { recursive: true, force: true });
+}
 
 recordExecution('COHERE-003');
 await incoherentCase({
@@ -1537,6 +1556,104 @@ await schemaViolationCase({
   label: 'a network that is not the Solana CAIP-2 form',
   mutate: (d) => ({ ...d, network: 'eip155:1' }),
 });
+
+// ---------------------------------------------------------------------------------------------
+// Evidence of a settlement that ended pending.
+// ---------------------------------------------------------------------------------------------
+
+console.log('\nEvidence of a pending settlement\n');
+
+const PENDING_RUN = { facilitator: { pendingSettlements: 2 } } as const;
+const OUTCOME_FACTS_CHECK = 'settlement facts match the outcome';
+
+/**
+ * EVID-PEND-001. The whole path, for a settlement the facilitator reported as pending twice.
+ *
+ * Produced through the real flow rather than assembled by hand, so what is verified is what the
+ * origin actually writes when the facilitator answers this way.
+ */
+recordExecution('EVID-PEND-001');
+{
+  const layout = await buildEvidence(await runOnce(PENDING_RUN));
+  const directory = mkdtempSync(join(tmpdir(), 'peac-evidence-pending-'));
+  try {
+    writeEvidence(directory, layout);
+    const observation = JSON.parse(
+      new TextDecoder().decode(layout.files.get('chain-observation.json')),
+    ) as Record<string, unknown>;
+    check(
+      'the observation records a pending outcome, its transaction and the pending terminal state',
+      observation['settlementOutcome'] === 'pending' &&
+        observation['transactionSignature'] === F.TX_SIGNATURE &&
+        observation['terminalState'] === 'settlement_pending' &&
+        observation['settlementFailureReason'] === undefined,
+      JSON.stringify(observation),
+    );
+    const report = await verifyEvidence(directory, fixtureKey.publicKey);
+    check(
+      'evidence of a pending settlement verifies',
+      report.ok === true,
+      failedChecks(report).join(', ') || 'nothing failed',
+    );
+    check(
+      'and says so in the settlement facts and the presence contract',
+      report.checks.some(
+        (c) => c.name === OUTCOME_FACTS_CHECK && c.ok && /pending/.test(c.detail ?? ''),
+      ) && report.checks.some((c) => c.name === 'artifact presence contract' && c.ok),
+      report.checks
+        .filter((c) => c.name === OUTCOME_FACTS_CHECK || c.name === 'artifact presence contract')
+        .map((c) => `${c.name}: ${c.detail ?? ''}`)
+        .join('; '),
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+/** EVID-PEND-002. The reference a reader reconciles against, removed. */
+recordExecution('EVID-PEND-002');
+{
+  const directory = await incoherentDirectory(
+    {
+      observation: (d) => {
+        const { transactionSignature: _reference, ...rest } = d;
+        return rest;
+      },
+    },
+    PENDING_RUN,
+  );
+  try {
+    const report = await verifyEvidence(directory, fixtureKey.publicKey);
+    const failing = failedChecks(report);
+    check(
+      'a pending observation without its transaction fails exactly the settlement facts check',
+      failing.length === 1 && failing[0] === OUTCOME_FACTS_CHECK,
+      failing.join(', ') || 'nothing failed',
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+/** EVID-PEND-003. A pending settlement relabelled as a success. */
+recordExecution('EVID-PEND-003');
+{
+  const directory = await incoherentDirectory(
+    { observation: (d) => ({ ...d, settlementOutcome: 'succeeded' }) },
+    PENDING_RUN,
+  );
+  try {
+    const report = await verifyEvidence(directory, fixtureKey.publicKey);
+    const failing = failedChecks(report);
+    check(
+      'a pending settlement relabelled as succeeded fails exactly the outcome-versus-state check',
+      failing.length === 1 && failing[0] === OUTCOME_STATE_CHECK,
+      failing.join(', ') || 'nothing failed',
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
 
 // ---------------------------------------------------------------------------------------------
 // What a remote party says, against what this flow writes down.

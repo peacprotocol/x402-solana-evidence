@@ -586,19 +586,55 @@ export async function verifyEvidence(
           ),
     );
 
-    const settled = observation.settlementOutcome === 'succeeded';
+    // A succeeded or pending settlement names its transaction; a refused or unreached one names
+    // none. Pending is the one outcome that carries a reference without claiming a payment: it is
+    // the handle a reader reconciles against, and the outcome beside it says it is unresolved.
+    const outcome = observation.settlementOutcome;
+    const expectsTransaction = outcome === 'succeeded' || outcome === 'pending';
     const hasTransaction = typeof observation.transactionSignature === 'string';
     checks.push(
-      settled === hasTransaction
+      expectsTransaction === hasTransaction
         ? pass(
             'settlement facts match the outcome',
-            settled ? 'settled, transaction recorded' : 'not settled, no transaction recorded',
+            outcome === 'succeeded'
+              ? 'settled, transaction recorded'
+              : outcome === 'pending'
+                ? 'pending, transaction recorded and unresolved'
+                : 'not settled, no transaction recorded',
           )
         : fail(
             'settlement facts match the outcome',
-            settled
-              ? 'settlement succeeded but no transaction reference is recorded'
+            expectsTransaction
+              ? `settlement ${outcome} but no transaction reference is recorded`
               : 'a transaction reference is recorded for a settlement that did not succeed',
+          ),
+    );
+
+    /**
+     * The outcome, against the terminal state written beside it.
+     *
+     * The two are stated by the same producer and derived from the same run, so they must agree:
+     * a settlement recorded as succeeded belongs to a run that wrote its result, a pending one to a
+     * run that ended pending, a refused one to a run that ended in settlement failure, and an
+     * unreached one to any run that never settled. An observation whose outcome says one thing
+     * while its terminal state says another has relabelled a settlement, which is the exact
+     * misstatement a reader of payment evidence cannot afford to inherit.
+     */
+    const terminal = observationDocument['terminalState'];
+    const outcomeFor = (state: unknown): string =>
+      state === 'response_write_attempted'
+        ? 'succeeded'
+        : state === 'settlement_pending'
+          ? 'pending'
+          : state === 'settlement_failed'
+            ? 'refused'
+            : 'not_reached';
+    checks.push(
+      typeof outcome === 'string' && typeof terminal === 'string' && outcomeFor(terminal) === outcome
+        ? pass('settlement outcome consistent with the terminal state', `${outcome} with ${terminal}`)
+        : fail(
+            'settlement outcome consistent with the terminal state',
+            `outcome ${describeBound(outcome)} beside terminal state ${describeBound(terminal)}`,
           ),
     );
 
@@ -640,7 +676,7 @@ export async function verifyEvidence(
        * signature failure: the record says exactly what each observer said, and it says it
        * intact. So the disagreement is surfaced where a reader will see it, and left there.
        */
-      if (sameTransaction && settled && nodeReportedError) {
+      if (sameTransaction && outcome === 'succeeded' && nodeReportedError) {
         warnings.push({
           name: 'observer disagreement',
           detail:

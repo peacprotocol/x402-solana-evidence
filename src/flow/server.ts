@@ -33,7 +33,7 @@ import {
   type FacilitatorClient,
   type RouteConfig,
 } from '@x402/core/server';
-import type { Network } from '@x402/core/types';
+import { SettleError, type Network } from '@x402/core/types';
 import {
   captureRequestComponents,
   ComponentError,
@@ -41,6 +41,35 @@ import {
 } from '../components.ts';
 import { persistableFailureReason } from './failure-vocabulary.ts';
 import { LifecycleRecorder, type LifecycleObservation } from './lifecycle.ts';
+
+/**
+ * The facilitator's reason for a settlement it reported as broadcast but not yet confirmed.
+ *
+ * Upstream does not export this string. It is the value `@x402/svm` places in `errorReason` and
+ * `@x402/core` matches on to retry, read from the installed 2.24.0 source and pinned by test.
+ */
+export const SETTLEMENT_PENDING_REASON = 'settlement_pending';
+
+/**
+ * Record a settlement that did not succeed, from the facilitator's reason and transaction.
+ *
+ * A pending report is only pending when it names the transaction it is pending on; upstream applies
+ * the same rule before retrying. A pending report with no transaction is recorded as the refusal
+ * it would otherwise be, because there is nothing to reconcile against.
+ */
+function recordUnsettled(
+  recorder: LifecycleRecorder | undefined,
+  errorReason: string | undefined,
+  transaction: string | undefined,
+): void {
+  if (errorReason === SETTLEMENT_PENDING_REASON && typeof transaction === 'string' && transaction.length > 0) {
+    recorder?.finish('settlement_pending', { transaction });
+    return;
+  }
+  recorder?.finish('settlement_failed', {
+    failureReason: persistableFailureReason(errorReason, 'settlement_rejected'),
+  });
+}
 
 /** The bytes an origin handler produced, before any transfer encoding. */
 export interface OriginResult {
@@ -212,13 +241,25 @@ export async function createPaidResource(options: PaidResourceOptions): Promise<
         recorder?.enter('payment_settled');
         recorder?.note({ transaction: context.result.transaction, payer: context.result.payer });
       } else {
-        recorder?.finish('settlement_failed', {
-          failureReason: persistableFailureReason(context.result.errorReason, 'settlement_rejected'),
-        });
+        // MEASURED against @x402/core 2.24.0: an unsuccessful settlement result no longer reaches
+        // this hook; it is delivered to the failure hook below. This branch is kept for the one
+        // path that still hands a result here regardless of success, a before-settle hook that
+        // skips settlement with a result of its own, and records it by the same rules.
+        recordUnsettled(recorder, context.result.errorReason, context.result.transaction);
       }
     })
     .onSettleFailure(async (context) => {
-      state()?.recorder.finish('settlement_failed', { failureReason: 'settlement_exception' });
+      const recorder = state()?.recorder;
+      // MEASURED against @x402/core 2.24.0: every unsuccessful settlement result arrives here as a
+      // `SettleError` carrying the facilitator's reason and transaction reference, including a
+      // settlement the facilitator reported as pending after the resource server's single retry.
+      // An exception raised by the facilitator arrives as whatever was thrown. The two are told
+      // apart by class, and only the first carries anything this flow reads.
+      if (context.error instanceof SettleError) {
+        recordUnsettled(recorder, context.error.errorReason, context.error.transaction);
+      } else {
+        recorder?.finish('settlement_failed', { failureReason: 'settlement_exception' });
+      }
     })
     .onVerifiedPaymentCanceled(async (context) => {
       const recorder = state()?.recorder;

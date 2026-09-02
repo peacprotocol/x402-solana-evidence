@@ -55,7 +55,8 @@
       "$ref": "#/$defs/base58Account"
     },
     "transactionSignature": {
-      "$ref": "#/$defs/base58Signature"
+      "$ref": "#/$defs/base58Signature",
+      "$comment": "Present when settlement succeeded or was reported pending; never beside a refusal. That relationship is checked by the verifier, not here."
     },
     "recentBlockhash": {
       "$ref": "#/$defs/base58Account"
@@ -82,12 +83,14 @@
         "verification_rejected",
         "handler_error_status",
         "settlement_failed",
+        "settlement_pending",
         "payment_required_only"
       ]
     },
     "settlementOutcome": {
       "enum": [
         "succeeded",
+        "pending",
         "refused",
         "not_reached"
       ]

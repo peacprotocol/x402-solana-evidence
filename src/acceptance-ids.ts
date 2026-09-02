@@ -68,6 +68,9 @@ export const ACCEPTANCE_CASES = {
   'SVM-LIFE-003': { description: 'handler returned an error status: cancellation, no settlement', scope: 'local' },
   'SVM-LIFE-004': { description: 'resource executed and settlement failed: recorded as never written', scope: 'local' },
   'SVM-LIFE-005': { description: 'a payment refused before verification produces verifiable evidence of the refusal', scope: 'local' },
+  'SVM-LIFE-006': { description: 'a settlement reported pending after the single upstream retry is recorded as pending with its transaction, never as a refusal', scope: 'local' },
+  'SVM-LIFE-007': { description: 'a settlement reported pending once and confirmed on the upstream retry is recorded as settled', scope: 'local' },
+  'SVM-LIFE-008': { description: 'a settlement refusal delivered through the failure hook keeps the facilitator\'s reason', scope: 'local' },
   /**
    * NARROWED, and the description says so rather than the claim being quietly widened later.
    * Whether a fee payer is isolated from the transfer it pays for is decided by the upstream SVM
@@ -252,6 +255,17 @@ export const ACCEPTANCE_CASES = {
    * separate matter: those are observed wire artifacts and carry exactly what was sent.
    */
   'SAN-ERR-001': { description: 'remote failure text never reaches a persisted reason or a durable diagnostic', scope: 'local' },
+
+  /**
+   * Evidence of a settlement that ended pending.
+   *
+   * A pending settlement is the one outcome that carries a transaction reference without claiming
+   * a payment. These cases hold the verifier to that: the reference must be there, the outcome must
+   * say pending, and the terminal state written beside it must agree.
+   */
+  'EVID-PEND-001': { description: 'evidence of a pending settlement verifies, with the transaction recorded and the outcome pending', scope: 'local' },
+  'EVID-PEND-002': { description: 'a pending observation with its transaction reference removed fails the settlement facts check', scope: 'local' },
+  'EVID-PEND-003': { description: 'a pending observation relabelled as succeeded fails the outcome-versus-terminal-state check', scope: 'local' },
 
   'EVID-TX-001': { description: 'an interrupted emission leaves no final evidence directory', scope: 'local' },
   'EVID-TX-002': { description: 'an existing evidence directory is never overwritten or written into', scope: 'local' },

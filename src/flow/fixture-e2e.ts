@@ -497,6 +497,11 @@ export async function main(): Promise<void> {
       options: { facilitator: { rejectSettlement: 'synthetic_settlement_refusal' } },
       terminal: 'settlement_failed',
     },
+    {
+      label: 'settlement pending',
+      options: { facilitator: { pendingSettlements: 2 } },
+      terminal: 'settlement_pending',
+    },
   ];
   console.log('\n  failure branches');
   for (const branch of branches) {

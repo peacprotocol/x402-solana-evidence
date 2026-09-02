@@ -41,6 +41,15 @@ export interface FixtureFacilitatorBehavior {
   readonly throwOnVerify?: string;
   /** Raise from settlement with this message, for the same reason. */
   readonly throwOnSettle?: string;
+  /**
+   * Report settlement as pending, with the fixed transaction reference, for this many settle
+   * calls before succeeding.
+   *
+   * Reproduces the report an upstream SVM facilitator gives when it has broadcast a transaction
+   * and did not observe its confirmation in time. One report exercises the resource server's
+   * retry; two exercise a pending report that survives it.
+   */
+  readonly pendingSettlements?: number;
 }
 
 /**
@@ -101,6 +110,18 @@ class FixtureExactSvmFacilitator implements SchemeNetworkFacilitator {
    */
   private readonly settlementCache = new SettlementCache();
 
+  /**
+   * Transactions this facilitator has reported as pending and not yet resolved.
+   *
+   * MEASURED against @x402/svm 2.24.0: a facilitator that reports a settlement as pending records
+   * the broadcast signature in a pending-settlement store, and a retry of the same payment
+   * reconciles against that signature rather than being refused as a duplicate. The duplicate
+   * refusal is for a payment that already settled; a payment whose settlement is unresolved is
+   * re-awaited. This set stands in for that store, so the resource server's retry reaches the
+   * pending branch below instead of the duplicate branch above it.
+   */
+  private readonly pendingTransactions = new Set<string>();
+
   private readonly behavior: FixtureFacilitatorBehavior;
   private readonly calls: FixtureFacilitatorCalls;
 
@@ -137,7 +158,9 @@ class FixtureExactSvmFacilitator implements SchemeNetworkFacilitator {
   ): Promise<SettleResponse> {
     this.calls.settle++;
     const transaction = payload.payload['transaction'];
-    if (typeof transaction === 'string' && this.settlementCache.isDuplicate(transaction)) {
+    const reconciling =
+      typeof transaction === 'string' && this.pendingTransactions.has(transaction);
+    if (!reconciling && typeof transaction === 'string' && this.settlementCache.isDuplicate(transaction)) {
       return {
         success: false,
         errorReason: DUPLICATE_SETTLEMENT_REASON,
@@ -147,6 +170,17 @@ class FixtureExactSvmFacilitator implements SchemeNetworkFacilitator {
       };
     }
     if (this.behavior.throwOnSettle !== undefined) throw new Error(this.behavior.throwOnSettle);
+    if (this.behavior.pendingSettlements !== undefined && this.calls.settle <= this.behavior.pendingSettlements) {
+      if (typeof transaction === 'string') this.pendingTransactions.add(transaction);
+      return {
+        success: false,
+        errorReason: 'settlement_pending',
+        errorMessage: 'synthetic confirmation timeout',
+        transaction: F.TX_SIGNATURE,
+        network: requirements.network,
+        payer: F.PAYER,
+      };
+    }
     if (this.behavior.rejectSettlement !== undefined) {
       return {
         success: false,
@@ -166,6 +200,7 @@ class FixtureExactSvmFacilitator implements SchemeNetworkFacilitator {
         payer: F.PAYER,
       };
     }
+    if (typeof transaction === 'string') this.pendingTransactions.delete(transaction);
     return {
       success: true,
       transaction: F.TX_SIGNATURE,

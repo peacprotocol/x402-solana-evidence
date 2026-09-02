@@ -294,6 +294,7 @@ anything is not observable from here, which is why the successful terminal state
 | F2 | `handler_error_status` | The handler failed, by throwing or by returning an error status. Canceled without settling. |
 | F3 | `settlement_failed` | The resource was produced and settlement failed. The result was never written to the client. |
 | F4 | (not a lifecycle state) | A bound document was modified after the fact. This is the tamper class, caught by verification rather than by the lifecycle. |
+| F5 | `settlement_pending` | The resource was produced, the facilitator reported a broadcast transaction whose confirmation it did not observe, and the resource server's single retry received the same report. The result was never written to the client. The transaction reference is recorded, the outcome is `pending`, and nothing here says whether it later confirmed. |
 
 Three measured details, stated because they change what the evidence can distinguish:
 

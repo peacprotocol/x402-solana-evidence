@@ -16,6 +16,7 @@ Evidence verification: fixtures/expected-evidence
   ok    artifact presence contract: consistent with response_write_attempted
   ok    chain observation scheme: exact
   ok    settlement facts match the outcome: settled, transaction recorded
+  ok    settlement outcome consistent with the terminal state: succeeded with response_write_attempted
   ok    record and observation name the same network: solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1
   ok    record and observation name the same terminal state: response_write_attempted
   ok    record and observation name the same asset: 4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU

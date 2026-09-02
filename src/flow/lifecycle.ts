@@ -67,6 +67,19 @@ export const TERMINAL_STATES = [
   'handler_error_status',
   /** F3: the resource was produced and settlement failed. The result was never written. */
   'settlement_failed',
+  /**
+   * F5: the resource was produced, the facilitator reported that a settlement transaction was
+   * broadcast, and its confirmation was not observed within the settlement attempt. The result
+   * was never written.
+   *
+   * MEASURED against @x402/core 2.24.0: the resource server retries a settlement the facilitator
+   * reports as `settlement_pending` exactly once, and a pending report that survives the retry is
+   * delivered to the settlement-failure hook carrying the transaction reference. Nothing this flow
+   * observes says whether that transaction later confirmed, so the state is neither a success nor a
+   * refusal, and labelling it as either would be a claim the origin cannot support. The reference
+   * is recorded because it is the handle a reader needs to reconcile the payment.
+   */
+  'settlement_pending',
   /** No payment was presented, so the challenge is the whole run. */
   'payment_required_only',
 ] as const;
@@ -96,7 +109,12 @@ export interface LifecycleObservation {
   readonly cancellationReason?: FailureReason;
   /** Why verification or settlement refused, from the same fixed vocabulary. */
   readonly failureReason?: FailureReason;
-  /** Transaction reference reported by settlement, when settlement succeeded. */
+  /**
+   * Transaction reference reported by settlement.
+   *
+   * Present when settlement succeeded, and when settlement reported a broadcast transaction as
+   * pending. Never present beside a refusal.
+   */
   readonly transaction?: string;
   /** Payer reported by verification or settlement. */
   readonly payer?: string;

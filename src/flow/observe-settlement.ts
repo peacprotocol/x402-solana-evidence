@@ -41,8 +41,15 @@ export interface ObservationSource {
   readonly reference: string;
 }
 
-/** How settlement ended, kept separate from the transaction facts it may or may not carry. */
-export const SETTLEMENT_OUTCOMES = ['succeeded', 'refused', 'not_reached'] as const;
+/**
+ * How settlement ended, kept separate from the transaction facts it may or may not carry.
+ *
+ * `pending` is neither of the other two: the facilitator reported a broadcast transaction whose
+ * confirmation it did not observe, and this flow did not observe it either. A reader who needs to
+ * know what became of it has the transaction reference and the network, and nothing here decides
+ * for them.
+ */
+export const SETTLEMENT_OUTCOMES = ['succeeded', 'pending', 'refused', 'not_reached'] as const;
 export type SettlementOutcome = (typeof SETTLEMENT_OUTCOMES)[number];
 
 export interface SolanaChainObservationV1 {
@@ -57,7 +64,10 @@ export interface SolanaChainObservationV1 {
   readonly assetDecimals: number;
   readonly recipient: string;
   readonly payer?: string;
-  /** Present only when settlement succeeded and reported one. */
+  /**
+   * Present when settlement succeeded and reported one, and when settlement reported one as
+   * pending. Never present beside a refusal.
+   */
   readonly transactionSignature?: string;
   /** Blockhash the challenge embedded, when the scheme supplied one. */
   readonly recentBlockhash?: string;
@@ -69,7 +79,7 @@ export interface SolanaChainObservationV1 {
    * Structurally apart from `observationSource` and never merged into it. Slot and commitment are
    * things only a node can report, so they exist here and nowhere else: a reader can always tell
    * which observer supplied which fact. Absent whenever no node was asked, which is every offline
-   * run and any live run that settled nothing.
+   * run and any live run that reported no transaction.
    */
   readonly rpcObservation?: RpcTransactionObservationV1;
   /** Digest of the settlement response exactly as observed. */
@@ -111,19 +121,30 @@ export interface NativeSettlementArtifacts {
 /**
  * Read a chain observation out of the native artifacts.
  *
- * The transaction reference is recorded only when settlement actually succeeded. A reference
- * carried alongside a failure would read as a payment that happened, so a refused settlement
- * records the refusal and no transaction facts at all.
+ * The transaction reference is recorded when settlement succeeded, and when settlement reported a
+ * broadcast transaction as pending. A reference carried alongside a refusal would read as a
+ * payment that happened, so a refused settlement records the refusal and no transaction facts at
+ * all. A pending settlement records the reference precisely because it is unresolved: it is what
+ * a reader reconciles against, and withholding it would leave the payment unfindable.
  */
 export function observeSettlement(
   artifacts: NativeSettlementArtifacts,
 ): SolanaChainObservationV1 {
   const { requirements, lifecycle, settleResponse } = artifacts;
   const settled = paymentWasSettled(lifecycle.terminalState) && settleResponse?.success === true;
-  const outcome: SettlementOutcome =
-    settled ? 'succeeded' : settleResponse !== undefined || lifecycle.terminalState === 'settlement_failed'
-      ? 'refused'
-      : 'not_reached';
+  const pending =
+    lifecycle.terminalState === 'settlement_pending' &&
+    settleResponse?.success === false &&
+    typeof settleResponse.transaction === 'string' &&
+    settleResponse.transaction.length > 0;
+  const outcome: SettlementOutcome = settled
+    ? 'succeeded'
+    : pending
+      ? 'pending'
+      : settleResponse !== undefined || lifecycle.terminalState === 'settlement_failed'
+        ? 'refused'
+        : 'not_reached';
+  const transactionReported = (settled || pending) && settleResponse?.transaction;
 
   const recentBlockhash = requirements.extra['recentBlockhash'];
 
@@ -136,14 +157,12 @@ export function observeSettlement(
     assetDecimals: artifacts.assetDecimals,
     recipient: requirements.payTo,
     ...(lifecycle.payer !== undefined ? { payer: lifecycle.payer } : {}),
-    ...(settled && settleResponse?.transaction
-      ? { transactionSignature: settleResponse.transaction }
-      : {}),
+    ...(transactionReported ? { transactionSignature: settleResponse.transaction } : {}),
     ...(typeof recentBlockhash === 'string' ? { recentBlockhash } : {}),
     observationSource: artifacts.observationSource,
-    // Carried only alongside a settlement that succeeded and reported a transaction, so a node's
-    // account can never appear beside a payment this run did not observe settling.
-    ...(settled && settleResponse?.transaction && artifacts.rpcObservation !== undefined
+    // Carried only alongside a reported transaction, succeeded or pending, so a node's account can
+    // never appear beside a payment this run observed no transaction for.
+    ...(transactionReported && artifacts.rpcObservation !== undefined
       ? { rpcObservation: artifacts.rpcObservation }
       : {}),
     ...(artifacts.settlementResponseDigest !== undefined

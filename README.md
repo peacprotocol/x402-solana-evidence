@@ -23,6 +23,34 @@ against a real Solana Devnet transaction; see
 Start with the [walkthrough](docs/WALKTHROUGH.md) for the full command path, the lifecycle state
 machine and the devnet procedure.
 
+## Reviewer path
+
+What it is: a portable, offline-verifiable evidence bundle for one x402 v2 `exact` payment
+interaction on Solana, binding the request that was made, the native x402 artifacts, the settlement
+as two separately attributed observers reported it, the lifecycle outcome, and the exact bytes the
+origin produced.
+
+The problem it addresses: when a paid request is disputed, reconciled or investigated later, the
+parties usually hold unrelated private logs. This evidence can be handed to another organisation and
+checked there, from the files and a public key alone, without access to the service's systems.
+
+What is Solana-specific: the x402 SVM `exact` scheme, CAIP-2 Solana network identifiers, SPL token
+payment requirements, the facilitator as fee payer, blockhash-bound transactions, and a separately
+attributed Solana RPC observation, all through the upstream `@x402/svm` stack.
+
+```bash
+corepack pnpm@8.15.0 install --frozen-lockfile
+corepack pnpm@8.15.0 demo:fixture    # offline end-to-end run; writes and verifies the evidence
+corepack pnpm@8.15.0 verify          # verify it again from the files and a public key
+corepack pnpm@8.15.0 tamper-demo     # edit one bound field in a copy; verification names it
+```
+
+Live proof: [Live Devnet Acceptance](docs/LIVE_DEVNET_ACCEPTANCE.md), a real payment on Solana
+Devnet with the transaction reference, both observations, and the tamper failure.
+
+Boundary: x402 stays the payment protocol and its native artifacts stay authoritative; there is no
+new payment rail, no Solana program, no token, and no change to the x402 or PEAC wire formats.
+
 ## What this demonstrates
 
 ```text
@@ -293,12 +321,13 @@ demonstrates and how far each part has actually been exercised.
 | offline verification from files and a public key | implemented |
 | tamper detection | implemented |
 | settlement observation and chain-observation documents | implemented |
-| scheme `upto` | out of scope |
-| batch settlement | out of scope |
-| streaming responses | out of scope |
-| mainnet | out of scope |
-| MCP carriers | out of scope |
-| EVM networks | out of scope |
+| settlement reported pending by the facilitator | recorded as `pending` with the transaction reference, never as a refusal; see the walkthrough's lifecycle table |
+| scheme `upto` | exists upstream; outside this reference's conformance scope |
+| batch settlement | exists upstream; outside this reference's conformance scope |
+| streaming responses | outside this reference's scope |
+| mainnet | outside this reference's scope; Devnet only |
+| MCP carriers | outside this reference's scope |
+| EVM networks | outside this reference's scope |
 
 ## Quickstart
 
